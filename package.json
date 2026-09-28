@@ -11,10 +11,17 @@
     "typecheck": "npm run typecheck -w backend && npm run typecheck -w frontend",
     "db:migrate": "npm run db:migrate -w backend",
     "db:seed": "npm run db:seed -w backend",
-    "db:studio": "npm run db:studio -w backend"
+    "db:studio": "npm run db:studio -w backend",
+    "commit": "cz",
+    "prepare": "husky"
   },
   "devDependencies": {
-    "concurrently": "^10.0.5"
+    "@commitlint/cli": "^21.2.3",
+    "@commitlint/config-conventional": "^21.2.3",
+    "commitizen": "^4.3.2",
+    "concurrently": "^10.0.5",
+    "cz-conventional-changelog": "^3.3.0",
+    "husky": "^9.1.7"
   },
   "overrides": {
     "esbuild": "^0.28.2",

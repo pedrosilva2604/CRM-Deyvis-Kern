@@ -1,0 +1,17 @@
+{
+  "path": "cz-conventional-changelog",
+  "maxHeaderWidth": 100,
+  "types": {
+    "feat": { "title": "Features", "description": "Adição de uma nova funcionalidade" },
+    "fix": { "title": "Bug Fixes", "description": "Correção de um bug" },
+    "chore": { "title": "Chores", "description": "Atualização de tarefas que não alteram o código de produção" },
+    "refactor": { "title": "Refactors", "description": "Mudança no código que não altera a funcionalidade final" },
+    "docs": { "title": "Documentation", "description": "Inclusão ou alteração somente de documentação" },
+    "perf": { "title": "Performance", "description": "Alteração de código que melhora o desempenho" },
+    "style": { "title": "Styles", "description": "Formatação do código (espaços, ponto e vírgula, lint), sem mudar comportamento" },
+    "test": { "title": "Tests", "description": "Adição de testes ausentes ou correção de testes existentes" },
+    "build": { "title": "Builds", "description": "Alterações no sistema de build ou nas dependências" },
+    "ci": { "title": "CI", "description": "Mudanças em arquivos e scripts de configuração de CI" },
+    "env": { "title": "Environment", "description": "Modificações em arquivos de configuração de ambiente e integração contínua" }
+  }
+}

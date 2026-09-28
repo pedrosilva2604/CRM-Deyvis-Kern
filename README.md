@@ -79,6 +79,34 @@ Todos os ids do banco são UUID nativo do PostgreSQL.
 | `npm run typecheck` | Checagem de tipos dos dois |
 | `npm run db:migrate` / `db:seed` / `db:studio` | Prisma |
 
+## Padrão de commits
+
+Os commits seguem o [Conventional Commits](https://www.conventionalcommits.org/pt-br/), validado automaticamente pelo Husky + commitlint a cada commit:
+
+```
+<tipo>(escopo opcional): <descrição em minúsculas, sem ponto final>
+```
+
+| Tipo | Quando usar |
+| --- | --- |
+| `feat` | Nova funcionalidade |
+| `fix` | Correção de bug |
+| `chore` | Tarefas que não alteram o código de produção |
+| `refactor` | Mudança no código sem alterar a funcionalidade final |
+| `docs` | Somente documentação |
+| `perf` | Melhoria de desempenho |
+| `style` | Formatação do código, sem mudar comportamento |
+| `test` | Adição ou correção de testes |
+| `build` | Sistema de build ou dependências |
+| `ci` | Arquivos e scripts de CI |
+| `env` | Arquivos de configuração de ambiente |
+
+Exemplos: `feat(backend): adiciona troca de senha pelo admin`, `fix(frontend): corrige tema no login`, `docs: atualiza tabela de rotas`.
+
+- `npm run commit` abre um assistente (Commitizen) que monta a mensagem no padrão.
+- Antes de cada commit roda `npm run typecheck`; se houver erro de tipos, o commit é bloqueado.
+- Commits com `Co-authored-by` são recusados.
+
 ## Licença
 
 Código disponível publicamente apenas para visualização. Todos os direitos reservados: não é permitido copiar, usar, modificar ou distribuir sem autorização. Veja [LICENSE](LICENSE).
