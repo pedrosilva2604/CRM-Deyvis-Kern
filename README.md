@@ -1,4 +1,4 @@
-# CRM
+# CRM - Deyvis Kern
 
 Monorepo (npm workspaces):
 
