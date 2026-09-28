@@ -1,0 +1,38 @@
+import type { PrismaClient } from '@prisma/client';
+import type { CreateSessionInput, SessionRecord } from '@/models/session.model';
+
+export interface ISessionRepository {
+  createSession(input: CreateSessionInput): Promise<{ id: string }>;
+  findSessionById(id: string): Promise<SessionRecord | null>;
+  revokeSession(id: string): Promise<void>;
+  revokeAllUserSessions(userId: string): Promise<void>;
+}
+
+export class PrismaSessionRepository implements ISessionRepository {
+  constructor(private readonly db: PrismaClient) {}
+
+  async createSession(input: CreateSessionInput): Promise<{ id: string }> {
+    return await this.db.session.create({ data: input, select: { id: true } });
+  }
+
+  async findSessionById(id: string): Promise<SessionRecord | null> {
+    return await this.db.session.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        userId: true,
+        expiresAt: true,
+        revokedAt: true,
+        user: { select: { active: true, role: true } },
+      },
+    });
+  }
+
+  async revokeSession(id: string): Promise<void> {
+    await this.db.session.updateMany({ where: { id, revokedAt: null }, data: { revokedAt: new Date() } });
+  }
+
+  async revokeAllUserSessions(userId: string): Promise<void> {
+    await this.db.session.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
+  }
+}
