@@ -26,7 +26,7 @@ Todos os ids do banco são UUID nativo do PostgreSQL.
 ### Orientação a objetos e injeção de dependência
 
 - Cada etapa é uma classe (`AuthController`, `AuthService`, `UserRepository`...), com métodos pequenos e uma responsabilidade.
-- Toda dependência é recebida pelo construtor e tipada por uma **interface com prefixo `I`** (`IUserRepository`, `ISessionService`); a classe leva o nome do papel (`UserRepository`, `SessionService`) ou da tecnologia quando houver mais de uma possível (`BcryptPasswordHasher`, `JwtTokenService`).
+- Toda dependência é recebida pelo construtor e tipada por uma **interface com prefixo `I`** (`IUserRepository`, `ISessionService`); a classe leva o nome do papel (`UserRepository`, `SessionService`) ou da tecnologia quando houver mais de uma possível (`Argon2PasswordHasher`, `JwtTokenService`).
 - Um repository por entidade, com todo o CRUD dela; as saídas são sempre DTOs de `models/`, convertidos por funções de mapeamento (`toUserOutput`...).
 - Composição em vez de herança: utilidades comuns (ex.: `RequestContextExtractor`) são injetadas nos controllers.
 - [`src/container.ts`](backend/src/container.ts) é o único lugar que cria instâncias concretas. Nos testes, monte as classes passando implementações falsas das interfaces (inclusive o `Clock`, para controlar o tempo).
@@ -37,7 +37,7 @@ Todos os ids do banco são UUID nativo do PostgreSQL.
 - **Rotas protegidas por padrão.** Só `GET /api/health` e as rotas de login e recuperação de senha são públicas; qualquer outra rota, inclusive as que forem criadas, exige sessão válida. Rotas administrativas exigem ainda o perfil `ADMIN`.
 - **Token fora do alcance do JavaScript.** O JWT nunca aparece no corpo das respostas: vai em um cookie `HttpOnly` + `SameSite=Strict` (e `Secure` em produção, via `SESSION_COOKIE_SECURE=true`). O conteúdo do JWT é só o id da sessão, assinado com HS256.
 - **Sessões revogáveis.** Cada login cria uma sessão no banco; o token só vale enquanto ela estiver ativa. Expira em `SESSION_TTL_HOURS`, é encerrada no logout e todas as sessões do usuário caem quando a senha é redefinida ou o usuário é desativado.
-- **Senhas com bcrypt** (custo em `BCRYPT_ROUNDS`). Tokens de redefinição de senha são guardados apenas como hash SHA-256, valem por `PASSWORD_RESET_TTL_MINUTES`, são de uso único e o link usa fragmento (`#token=`), que não vai para servidores, logs nem cabeçalho `Referer`.
+- **Senhas com Argon2id**, algoritmo recomendado pela OWASP: cada hash usa sal aleatório e exige memória (`ARGON2_MEMORY_KIB`), o que encarece ataques com GPU. Os parâmetros ficam no `.env` (mínimo OWASP: 19 MiB, 2 iterações, paralelismo 1). Login com e-mail inexistente também executa uma verificação Argon2, para o tempo de resposta não revelar quais e-mails estão cadastrados. Tokens de redefinição de senha são guardados apenas como hash SHA-256, valem por `PASSWORD_RESET_TTL_MINUTES`, são de uso único e o link usa fragmento (`#token=`), que não vai para servidores, logs nem cabeçalho `Referer`.
 - **Erros genéricos.** Login responde sempre `Credenciais inválidas` (e-mail inexistente, senha errada, usuário inativo ou dados mal formatados); sessões recusadas respondem sempre `Sessão inválida ou expirada`; "esqueci minha senha" responde igual para e-mails cadastrados ou não; erros internos nunca expõem detalhes.
 - **Limite de tentativas** por IP (e por IP + e-mail no login e na recuperação), configurável no `.env`.
 - **Cabeçalhos de segurança** via Helmet, CORS restrito a `CORS_ORIGIN`, portas do Docker expostas apenas em `127.0.0.1`.

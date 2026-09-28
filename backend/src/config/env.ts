@@ -16,7 +16,9 @@ const envSchema = z.object({
   SESSION_TTL_HOURS: positiveInteger,
   SESSION_COOKIE_NAME: z.string().min(1),
   SESSION_COOKIE_SECURE: booleanFlag,
-  BCRYPT_ROUNDS: z.coerce.number().int().min(10).max(15),
+  ARGON2_MEMORY_KIB: z.coerce.number().int().min(19456),
+  ARGON2_ITERATIONS: z.coerce.number().int().min(2),
+  ARGON2_PARALLELISM: z.coerce.number().int().min(1).max(16),
   PASSWORD_RESET_TTL_MINUTES: positiveInteger,
 
   RATE_LIMIT_WINDOW_MINUTES: positiveInteger,

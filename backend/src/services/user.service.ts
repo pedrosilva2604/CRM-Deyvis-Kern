@@ -14,7 +14,7 @@ import type {
 } from '@/models/user.model';
 import type { IUserRepository } from '@/repositories/user.repository';
 import type { IAuditService } from './audit.service';
-import type { IPasswordHasher } from './password-hasher.service';
+import type { IPasswordHasher } from '@/lib/password-hasher';
 import type { ISessionService } from './session.service';
 
 export interface IUserService {

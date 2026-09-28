@@ -8,6 +8,7 @@ import { ProfileController } from '@/controllers/profile.controller';
 import { UserController } from '@/controllers/user.controller';
 import { SystemClock } from '@/lib/clock';
 import { SmtpMailer } from '@/lib/mailer';
+import { Argon2PasswordHasher } from '@/lib/password-hasher';
 import { ExpressRequestContextExtractor } from '@/lib/request-context-extractor';
 import { HttpOnlySessionCookie } from '@/lib/session-cookie';
 import { SocketGateway } from '@/lib/socket';
@@ -26,7 +27,6 @@ import { UserRoutes } from '@/routes/user.routes';
 import { AuditService } from '@/services/audit.service';
 import { AuthService } from '@/services/auth.service';
 import { MailService } from '@/services/mail.service';
-import { BcryptPasswordHasher } from '@/services/password-hasher.service';
 import { PasswordResetService } from '@/services/password-reset.service';
 import { ProfileService } from '@/services/profile.service';
 import { SessionService } from '@/services/session.service';
@@ -51,7 +51,11 @@ const sessionRepository = new PrismaSessionRepository(prisma);
 const passwordResetTokenRepository = new PrismaPasswordResetTokenRepository(prisma);
 const auditLogRepository = new PrismaAuditLogRepository(prisma);
 
-const passwordHasher = new BcryptPasswordHasher(env.BCRYPT_ROUNDS);
+const passwordHasher = new Argon2PasswordHasher({
+  memoryKib: env.ARGON2_MEMORY_KIB,
+  iterations: env.ARGON2_ITERATIONS,
+  parallelism: env.ARGON2_PARALLELISM,
+});
 const tokenService = new JwtTokenService(env.JWT_SECRET);
 const auditService = new AuditService(auditLogRepository);
 const mailService = new MailService(mailer, env.APP_NAME);

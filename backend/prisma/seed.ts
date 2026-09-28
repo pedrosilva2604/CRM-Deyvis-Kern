@@ -1,12 +1,14 @@
-import bcrypt from 'bcryptjs';
 import { PrismaClient, Role } from '@prisma/client';
 import { z } from 'zod';
+import { Argon2PasswordHasher } from '../src/lib/password-hasher';
 
 const seedEnvSchema = z.object({
   SEED_ADMIN_NAME: z.string().trim().min(2),
   SEED_ADMIN_EMAIL: z.string().trim().toLowerCase().email(),
   SEED_ADMIN_PASSWORD: z.string().min(12),
-  BCRYPT_ROUNDS: z.coerce.number().int().min(10).max(15),
+  ARGON2_MEMORY_KIB: z.coerce.number().int().min(19456),
+  ARGON2_ITERATIONS: z.coerce.number().int().min(2),
+  ARGON2_PARALLELISM: z.coerce.number().int().min(1).max(16),
 });
 
 const defaultPipeline = {
@@ -31,7 +33,12 @@ function readSeedEnv() {
 }
 
 async function seedAdmin(seedEnv: z.infer<typeof seedEnvSchema>) {
-  const passwordHash = await bcrypt.hash(seedEnv.SEED_ADMIN_PASSWORD, seedEnv.BCRYPT_ROUNDS);
+  const hasher = new Argon2PasswordHasher({
+    memoryKib: seedEnv.ARGON2_MEMORY_KIB,
+    iterations: seedEnv.ARGON2_ITERATIONS,
+    parallelism: seedEnv.ARGON2_PARALLELISM,
+  });
+  const passwordHash = await hasher.hashPassword(seedEnv.SEED_ADMIN_PASSWORD);
   await prisma.user.upsert({
     where: { email: seedEnv.SEED_ADMIN_EMAIL },
     update: {},
