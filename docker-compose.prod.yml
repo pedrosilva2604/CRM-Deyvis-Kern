@@ -90,12 +90,13 @@ services:
         VITE_APP_NAME: ${VITE_APP_NAME:?defina VITE_APP_NAME no .env}
     restart: unless-stopped
     environment:
-      API_UPSTREAM: http://api:3333
+      API_UPSTREAM: ${API_UPSTREAM:?defina API_UPSTREAM no .env}
+      WEB_LISTEN_PORT: ${WEB_LISTEN_PORT:?defina WEB_LISTEN_PORT no .env}
     depends_on:
       api:
         condition: service_healthy
     ports:
-      - "${WEB_PORT:-80}:80"
+      - "${WEB_PORT:?defina WEB_PORT no .env}:${WEB_LISTEN_PORT}"
     networks: [frontend_network]
 
 networks:
