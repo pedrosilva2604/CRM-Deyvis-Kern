@@ -43,6 +43,8 @@ Todos os ids do banco são UUID nativo do PostgreSQL.
 - **Cabeçalhos de segurança** via Helmet, CORS restrito a `CORS_ORIGIN`, portas do Docker expostas apenas em `127.0.0.1`.
 - **Nada sensível no repositório.** Chaves, senhas e URLs vêm dos arquivos `.env` (ignorados pelo git); os `.env.example` trazem só os nomes das variáveis. Arquivos `.sql`, dumps de banco, migrations e chaves/certificados também são ignorados.
 
+**Respostas:** rotas de leitura (`GET`) devolvem os dados, sempre filtrados pelo DTO (nunca senha, hash ou campos internos). Rotas que alteram dados (criar, editar, excluir, ativar, desativar, trocar senha ou tema) respondem **só** `{ "message": "..." }` (ex.: `Lead criado`, `Usuário atualizado`), sem nenhum dado do registro; a tela busca os dados de novo pelo `GET`. Exclusões respondem `200` com a mensagem. Erros respondem `{ "error": "..." }`, e erros de validação trazem também `issues` por campo.
+
 | Rota | Acesso | O que faz |
 | --- | --- | --- |
 | `GET /api/health` | pública | Verifica se a API está no ar |
@@ -64,7 +66,7 @@ Todos os ids do banco são UUID nativo do PostgreSQL.
 | `GET /api/leads/filter-options` | sessão | Funis e etapas, origens em uso e usuários ativos que podem ser responsáveis |
 | `GET /api/leads/:leadId` | sessão | Detalhes de um lead |
 | `POST /api/leads` | sessão | Cria um lead. Telefone e e-mail são únicos no CRM inteiro (409 se já existirem, inclusive em lead excluído) |
-| `PATCH /api/leads/:leadId` | sessão | Edita um lead; trocar o telefone recalcula o país (`phoneCountry`) |
+| `PATCH /api/leads/:leadId` | sessão | Edita um lead; só grava e audita os campos que realmente mudaram; trocar o telefone recalcula o país (`phoneCountry`) |
 | `DELETE /api/leads/:leadId` | ADMIN | Exclusão lógica (`deletedAt`): some das telas, mas o histórico fica e o telefone/e-mail continuam bloqueados |
 
 ## Rodando localmente

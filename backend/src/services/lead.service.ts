@@ -15,7 +15,10 @@ import type {
   LeadListFilters,
   LeadListPage,
   LeadOutput,
+  LeadUpdateResult,
+  UpdatableLeadField,
   UpdateLeadData,
+  UpdateLeadInput,
   UpdateLeadRequest,
 } from '@/models/lead.model';
 import type { ILeadRepository } from '@/repositories/lead.repository';
@@ -31,7 +34,7 @@ export interface ILeadService {
   getLeadBaseIndicators(): Promise<LeadBaseIndicators>;
   getLeadFilterOptions(): Promise<LeadFilterOptions>;
   createLead(newLead: CreateLeadInput, loggedUserContext: LoggedUserContext): Promise<LeadOutput>;
-  updateLead(request: UpdateLeadRequest, loggedUserContext: LoggedUserContext): Promise<LeadOutput>;
+  updateLead(request: UpdateLeadRequest, loggedUserContext: LoggedUserContext): Promise<LeadUpdateResult>;
   deleteLead(request: DeleteLeadRequest, loggedUserContext: LoggedUserContext): Promise<void>;
 }
 
@@ -95,27 +98,34 @@ export class LeadService implements ILeadService {
   async updateLead(
     { targetLeadId, leadChanges }: UpdateLeadRequest,
     loggedUserContext: LoggedUserContext,
-  ): Promise<LeadOutput> {
-    await this.findExistingLeadOrFail(targetLeadId);
-    if (leadChanges.assignedToId) await this.assertAssigneeIsAvailable(leadChanges.assignedToId);
+  ): Promise<LeadUpdateResult> {
+    const existingLead = await this.findExistingLeadOrFail(targetLeadId);
+    const updatedFields = this.listFieldsThatChange(existingLead, leadChanges);
+    if (updatedFields.length === 0) return { updatedFields };
 
-    const stageLocation = leadChanges.stageId ? await this.findStageLocationOrFail(leadChanges.stageId) : null;
+    const effectiveChanges = this.keepOnlyFields(leadChanges, updatedFields);
+    if (effectiveChanges.assignedToId) await this.assertAssigneeIsAvailable(effectiveChanges.assignedToId);
+    const stageLocation = effectiveChanges.stageId ? await this.findStageLocationOrFail(effectiveChanges.stageId) : null;
+
     const leadData: UpdateLeadData = {
-      name: leadChanges.name,
-      email: leadChanges.email,
-      source: leadChanges.source,
-      tags: leadChanges.tags,
-      value: leadChanges.value,
-      assignedToId: leadChanges.assignedToId,
-      contactStatus: leadChanges.contactStatus,
-      ...(leadChanges.phone && { phone: leadChanges.phone, phoneCountry: this.countryOfPhone(leadChanges.phone) }),
-      ...(leadChanges.enteredOn && { enteredOn: this.readEnteredOnOrToday(leadChanges.enteredOn) }),
+      name: effectiveChanges.name,
+      email: effectiveChanges.email,
+      source: effectiveChanges.source,
+      tags: effectiveChanges.tags,
+      value: effectiveChanges.value,
+      assignedToId: effectiveChanges.assignedToId,
+      contactStatus: effectiveChanges.contactStatus,
+      ...(effectiveChanges.phone && {
+        phone: effectiveChanges.phone,
+        phoneCountry: this.countryOfPhone(effectiveChanges.phone),
+      }),
+      ...(effectiveChanges.enteredOn && { enteredOn: this.readEnteredOnOrToday(effectiveChanges.enteredOn) }),
       ...(stageLocation && { stageId: stageLocation.stageId, pipelineId: stageLocation.pipelineId }),
     };
 
-    const updatedLead = await this.leadRepository.updateLead(targetLeadId, leadData);
-    await this.recordLeadAuditLog(loggedUserContext, 'lead.update', targetLeadId, { changedFields: Object.keys(leadChanges) });
-    return updatedLead;
+    await this.leadRepository.updateLead(targetLeadId, leadData);
+    await this.recordLeadAuditLog(loggedUserContext, 'lead.update', targetLeadId, { updatedFields });
+    return { updatedFields };
   }
 
   async deleteLead({ targetLeadId }: DeleteLeadRequest, loggedUserContext: LoggedUserContext): Promise<void> {
@@ -127,6 +137,29 @@ export class LeadService implements ILeadService {
       name: leadToDelete.name,
       phone: leadToDelete.phone,
     });
+  }
+
+  private listFieldsThatChange(existingLead: LeadOutput, leadChanges: UpdateLeadInput): UpdatableLeadField[] {
+    const currentValueByField: Record<UpdatableLeadField, unknown> = {
+      name: existingLead.name,
+      phone: existingLead.phone,
+      email: existingLead.email,
+      enteredOn: existingLead.enteredOn,
+      stageId: existingLead.stage.id,
+      source: existingLead.source,
+      tags: existingLead.tags,
+      value: existingLead.value,
+      assignedToId: existingLead.assignedTo?.id ?? null,
+      contactStatus: existingLead.contactStatus,
+    };
+    return (Object.keys(leadChanges) as UpdatableLeadField[]).filter((field) => {
+      const requestedValue = leadChanges[field];
+      return requestedValue !== undefined && JSON.stringify(requestedValue) !== JSON.stringify(currentValueByField[field]);
+    });
+  }
+
+  private keepOnlyFields(leadChanges: UpdateLeadInput, fieldsToKeep: UpdatableLeadField[]): UpdateLeadInput {
+    return Object.fromEntries(fieldsToKeep.map((field) => [field, leadChanges[field]])) as UpdateLeadInput;
   }
 
   private async findExistingLeadOrFail(leadId: string): Promise<LeadOutput> {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
-import { useAuth, type AuthUser, type Theme } from '@/stores/auth';
+import { useAuth, type Theme } from '@/stores/auth';
 
 const DARK_CLASS = 'dark';
 const DEFAULT_THEME: Theme = 'LIGHT';
@@ -27,7 +27,7 @@ export function useThemeToggle() {
     setTheme(next);
     setSaving(true);
     try {
-      await api.patch<AuthUser>('/profile/theme', { theme: next });
+      await api.patch('/profile/theme', { theme: next });
     } catch {
       setTheme(theme);
     } finally {
