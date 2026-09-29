@@ -2,13 +2,14 @@
   "name": "crm-deyvis-kern",
   "private": true,
   "workspaces": [
+    "shared",
     "backend",
     "frontend"
   ],
   "scripts": {
     "dev": "concurrently -n api,web -c blue,magenta \"npm run dev -w backend\" \"npm run dev -w frontend\"",
     "build": "npm run build -w backend && npm run build -w frontend",
-    "typecheck": "npm run typecheck -w backend && npm run typecheck -w frontend",
+    "typecheck": "npm run typecheck -w shared && npm run typecheck -w backend && npm run typecheck -w frontend",
     "db:migrate": "npm run db:migrate -w backend",
     "db:seed": "npm run db:seed -w backend",
     "db:studio": "npm run db:studio -w backend",

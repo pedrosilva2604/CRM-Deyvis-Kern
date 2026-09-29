@@ -15,6 +15,7 @@
     "db:studio": "prisma studio"
   },
   "dependencies": {
+    "@crm/shared": "^0.1.0",
     "@prisma/client": "^6.19.3",
     "axios": "^1.20.0",
     "cookie": "^1.1.1",
