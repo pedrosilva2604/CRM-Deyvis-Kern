@@ -39,7 +39,7 @@ export function UserPasswordDialog({ user, isSelf, onClose, onSaved }: UserPassw
     if (Object.keys(localErrors).length > 0) return;
 
     try {
-      await changePassword.mutateAsync({ id: user.id, password });
+      await changePassword.mutateAsync({ userId: user.id, newPassword: password });
       onSaved(`Senha de ${user.name} alterada. As sessões abertas dele foram encerradas.`);
     } catch (err) {
       const errors = apiFieldErrors(err);

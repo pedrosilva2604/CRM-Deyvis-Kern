@@ -1,23 +1,23 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '@/lib/api';
-import type { CreateUserPayload, ManagedUser, UpdateUserPayload } from '@/types/user';
+import { usersApi } from '@/api/usersApi';
+import type { CreateUserPayload, UpdateUserPayload } from '@/types/user';
 
 const USERS_QUERY_KEY = ['users'] as const;
 
-interface UpdateUserVariables {
-  id: string;
-  data: UpdateUserPayload;
+interface UserUpdate {
+  userId: string;
+  userChanges: UpdateUserPayload;
 }
 
-interface ChangePasswordVariables {
-  id: string;
-  password: string;
+interface UserPasswordChange {
+  userId: string;
+  newPassword: string;
 }
 
-function useUsersMutation<TVariables, TResult>(mutationFn: (variables: TVariables) => Promise<TResult>) {
+function useUsersMutation<TVariables, TResult>(sendChangeToApi: (variables: TVariables) => Promise<TResult>) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn,
+    mutationFn: sendChangeToApi,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: USERS_QUERY_KEY }),
   });
 }
@@ -25,36 +25,32 @@ function useUsersMutation<TVariables, TResult>(mutationFn: (variables: TVariable
 export function useUsers() {
   return useQuery({
     queryKey: USERS_QUERY_KEY,
-    queryFn: async () => (await api.get<ManagedUser[]>('/users')).data,
+    queryFn: () => usersApi.listUsers(),
   });
 }
 
 export function useCreateUser() {
-  return useUsersMutation(async (payload: CreateUserPayload) => (await api.post<ManagedUser>('/users', payload)).data);
+  return useUsersMutation((newUser: CreateUserPayload) => usersApi.registerUser(newUser));
 }
 
 export function useUpdateUser() {
-  return useUsersMutation(
-    async ({ id, data }: UpdateUserVariables) => (await api.patch<ManagedUser>(`/users/${id}`, data)).data,
-  );
+  return useUsersMutation(({ userId, userChanges }: UserUpdate) => usersApi.updateUser(userId, userChanges));
 }
 
 export function useActivateUser() {
-  return useUsersMutation(async (id: string) => (await api.patch<ManagedUser>(`/users/${id}/activate`)).data);
+  return useUsersMutation((userId: string) => usersApi.activateUser(userId));
 }
 
 export function useDeactivateUser() {
-  return useUsersMutation(async (id: string) => (await api.patch<ManagedUser>(`/users/${id}/deactivate`)).data);
+  return useUsersMutation((userId: string) => usersApi.deactivateUser(userId));
 }
 
 export function useChangeUserPassword() {
-  return useUsersMutation(async ({ id, password }: ChangePasswordVariables) => {
-    await api.patch(`/users/${id}/password`, { password });
-  });
+  return useUsersMutation(({ userId, newPassword }: UserPasswordChange) =>
+    usersApi.changeUserPassword(userId, newPassword),
+  );
 }
 
 export function useDeleteUser() {
-  return useUsersMutation(async (id: string) => {
-    await api.delete(`/users/${id}`);
-  });
+  return useUsersMutation((userId: string) => usersApi.deleteUser(userId));
 }

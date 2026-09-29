@@ -63,7 +63,7 @@ export function UserFormDialog({ user, isSelf = false, onClose, onSaved }: UserF
   async function saveChanges(existingUser: ManagedUser) {
     const changes = collectChanges(existingUser, values);
     if (Object.keys(changes).length === 0) return onClose();
-    await updateUser.mutateAsync({ id: existingUser.id, data: changes });
+    await updateUser.mutateAsync({ userId: existingUser.id, userChanges: changes });
     if (isSelf) await refreshOwnSession();
     onSaved(`Dados de ${values.name.trim()} atualizados.`);
   }
