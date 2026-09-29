@@ -1,14 +1,22 @@
 import { useEffect, useId, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 
+type ModalSize = 'medium' | 'large';
+
+const modalWidths: Record<ModalSize, string> = {
+  medium: 'max-w-md',
+  large: 'max-w-3xl',
+};
+
 interface ModalProps {
   title: string;
   description?: string;
+  size?: ModalSize;
   onClose: () => void;
   children: ReactNode;
 }
 
-export function Modal({ title, description, onClose, children }: ModalProps) {
+export function Modal({ title, description, size = 'medium', onClose, children }: ModalProps) {
   const titleId = useId();
 
   useEffect(() => {
@@ -26,7 +34,7 @@ export function Modal({ title, description, onClose, children }: ModalProps) {
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="relative max-h-full w-full max-w-md overflow-y-auto rounded-xl bg-white p-6 shadow-xl ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-800"
+        className={`relative max-h-full w-full ${modalWidths[size]} overflow-y-auto rounded-xl bg-white p-6 shadow-xl ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-800`}
       >
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>

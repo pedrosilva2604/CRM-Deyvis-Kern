@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from 'react-router';
 import clsx from 'clsx';
 import {
+  Contact,
   LayoutDashboard,
   KanbanSquare,
   MessageCircle,
@@ -24,6 +25,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { to: '/leads', label: 'Leads', icon: Contact },
   { to: '/kanban', label: 'Funis', icon: KanbanSquare },
   { to: '/chat', label: 'Chat', icon: MessageCircle },
   { to: '/disparos', label: 'Disparos', icon: Send },
