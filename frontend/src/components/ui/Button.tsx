@@ -3,7 +3,7 @@ import clsx from 'clsx';
 import { Loader2 } from 'lucide-react';
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: 'primary' | 'secondary';
+  variant?: 'primary' | 'secondary' | 'danger';
   loading?: boolean;
 }
 
@@ -11,6 +11,7 @@ const variants = {
   primary: 'bg-indigo-600 text-white shadow-sm hover:bg-indigo-500 focus-visible:ring-indigo-200',
   secondary:
     'bg-white text-slate-700 ring-1 ring-slate-300 hover:bg-slate-50 focus-visible:ring-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:ring-slate-700 dark:hover:bg-slate-800',
+  danger: 'bg-red-600 text-white shadow-sm hover:bg-red-500 focus-visible:ring-red-200 dark:focus-visible:ring-red-900/60',
 };
 
 export function Button({ variant = 'primary', loading, disabled, className, children, ...props }: ButtonProps) {

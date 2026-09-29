@@ -15,7 +15,15 @@ api.interceptors.response.use(
   },
 );
 
+export type FieldErrors = Partial<Record<string, string>>;
+
 export function apiErrorMessage(err: unknown, fallback = 'Ocorreu um erro') {
   if (axios.isAxiosError(err)) return (err.response?.data as { error?: string })?.error ?? fallback;
   return fallback;
+}
+
+export function apiFieldErrors(err: unknown): FieldErrors {
+  if (!axios.isAxiosError(err)) return {};
+  const issues = (err.response?.data as { issues?: Record<string, string[] | undefined> })?.issues ?? {};
+  return Object.fromEntries(Object.entries(issues).map(([field, messages]) => [field, messages?.[0]]));
 }

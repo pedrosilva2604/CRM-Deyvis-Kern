@@ -4,7 +4,7 @@ import { ScrollText, Users } from 'lucide-react';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { Tabs, type TabItem } from '@/components/ui/Tabs';
 import { AuditLogsTab } from './AuditLogsTab';
-import { UsersTab } from './UsersTab';
+import { UsersTab } from './users/UsersTab';
 
 type AdminTab = 'usuarios' | 'logs';
 
