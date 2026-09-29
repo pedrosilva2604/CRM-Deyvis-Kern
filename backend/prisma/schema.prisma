@@ -135,14 +135,23 @@ model Stage {
   @@index([pipelineId])
 }
 
+enum LeadContactStatus {
+  VALID
+  INVALID
+  SPAM
+}
+
 model Lead {
   id            String            @id @default(uuid()) @db.Uuid
   name          String
-  phone         String
-  email         String?
+  phone         String            @unique
+  phoneCountry  String?
+  email         String?           @unique
   source        String?
   tags          String[]          @default([])
   value         Decimal?          @db.Decimal(12, 2)
+  contactStatus LeadContactStatus @default(VALID)
+  enteredOn     DateTime          @db.Date
   position      Int               @default(0)
   pipelineId    String            @db.Uuid
   pipeline      Pipeline          @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
@@ -156,14 +165,19 @@ model Lead {
   lastMessageAt DateTime?
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
+  deletedAt     DateTime?
 
   messages   Message[]
   recipients CampaignRecipient[]
   sales      Sale[]
 
-  @@unique([phone, pipelineId])
   @@index([stageId])
   @@index([lastMessageAt])
+  @@index([assignedToId])
+  @@index([contactStatus])
+  @@index([source])
+  @@index([enteredOn])
+  @@index([deletedAt, createdAt])
 }
 
 enum MessageDirection {

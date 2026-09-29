@@ -1,4 +1,5 @@
 import { Role, type PrismaClient, type Theme } from '@prisma/client';
+import type { LeadPersonOutput } from '@/models/lead.model';
 import {
   toRegisteredUserOutput,
   toUserCredentials,
@@ -17,6 +18,8 @@ export interface IUserRepository {
   findUserByEmail(email: string): Promise<RegisteredUserOutput | null>;
   findUserCredentialsByEmail(email: string): Promise<UserCredentials | null>;
   countActiveAdmins(): Promise<number>;
+  findActiveUsersForAssignment(): Promise<LeadPersonOutput[]>;
+  isActiveUser(id: string): Promise<boolean>;
   updateUser(id: string, data: UpdateUserData): Promise<RegisteredUserOutput>;
   updateUserTheme(id: string, theme: Theme): Promise<UserOutput>;
   activateUser(id: string): Promise<RegisteredUserOutput>;
@@ -55,6 +58,18 @@ export class UserRepository implements IUserRepository {
 
   async countActiveAdmins(): Promise<number> {
     return await this.prisma.user.count({ where: { role: Role.ADMIN, active: true } });
+  }
+
+  async findActiveUsersForAssignment(): Promise<LeadPersonOutput[]> {
+    return await this.prisma.user.findMany({
+      where: { active: true },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true },
+    });
+  }
+
+  async isActiveUser(id: string): Promise<boolean> {
+    return (await this.prisma.user.count({ where: { id, active: true } })) > 0;
   }
 
   async updateUser(id: string, data: UpdateUserData): Promise<RegisteredUserOutput> {

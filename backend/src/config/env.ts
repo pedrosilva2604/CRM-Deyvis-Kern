@@ -3,11 +3,21 @@ import { z } from 'zod';
 const booleanFlag = z.enum(['true', 'false']).transform((value) => value === 'true');
 const positiveInteger = z.coerce.number().int().positive();
 
+function isKnownTimeZone(timeZone: string) {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']),
   PORT: positiveInteger,
   APP_NAME: z.string().min(1),
   APP_URL: z.string().url(),
+  APP_TIME_ZONE: z.string().refine(isKnownTimeZone, 'Fuso horário desconhecido (ex.: America/Sao_Paulo)'),
   CORS_ORIGIN: z.string().url(),
   JSON_BODY_LIMIT: z.string().min(1),
   TRUST_PROXY: z

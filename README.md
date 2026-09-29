@@ -59,6 +59,13 @@ Todos os ids do banco são UUID nativo do PostgreSQL.
 | `PATCH /api/users/:id/deactivate` | ADMIN | Desativa um usuário e encerra as sessões dele (não vale para si mesmo nem para o último admin ativo) |
 | `PATCH /api/users/:id/password` | ADMIN | Define uma nova senha para o usuário e encerra as sessões dele |
 | `DELETE /api/users/:id` | ADMIN | Exclui um usuário |
+| `GET /api/leads` | sessão | Lista leads com busca (nome, e-mail, telefone), filtros (`stageId`, `source`, `assignment` = id ou `unassigned`, `contactStatus`) e paginação (`page`, `pageSize` até 100) |
+| `GET /api/leads/indicators` | sessão | KPIs da base: total, novos em 7 dias (pela data de entrada, no fuso `APP_TIME_ZONE`), sem responsável, inválidos/spam, cadastros completos |
+| `GET /api/leads/filter-options` | sessão | Funis e etapas, origens em uso e usuários ativos que podem ser responsáveis |
+| `GET /api/leads/:leadId` | sessão | Detalhes de um lead |
+| `POST /api/leads` | sessão | Cria um lead. Telefone e e-mail são únicos no CRM inteiro (409 se já existirem, inclusive em lead excluído) |
+| `PATCH /api/leads/:leadId` | sessão | Edita um lead; trocar o telefone recalcula o país (`phoneCountry`) |
+| `DELETE /api/leads/:leadId` | ADMIN | Exclusão lógica (`deletedAt`): some das telas, mas o histórico fica e o telefone/e-mail continuam bloqueados |
 
 ## Rodando localmente
 

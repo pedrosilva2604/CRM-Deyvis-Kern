@@ -3,9 +3,11 @@ import { App } from '@/app';
 import { env } from '@/config/env';
 import { AuthController } from '@/controllers/auth.controller';
 import { HealthController } from '@/controllers/health.controller';
+import { LeadController } from '@/controllers/lead.controller';
 import { PasswordController } from '@/controllers/password.controller';
 import { ProfileController } from '@/controllers/profile.controller';
 import { UserController } from '@/controllers/user.controller';
+import { TimeZoneBusinessCalendar } from '@/lib/business-calendar';
 import { SystemClock } from '@/lib/clock';
 import { SmtpMailer } from '@/lib/mailer';
 import { Argon2PasswordHasher } from '@/lib/password-hasher';
@@ -17,15 +19,19 @@ import { ErrorMiddleware } from '@/middlewares/error.middleware';
 import { RateLimitMiddleware } from '@/middlewares/rate-limit.middleware';
 import { ValidationMiddleware } from '@/middlewares/validation.middleware';
 import { PrismaAuditLogRepository } from '@/repositories/audit-log.repository';
+import { LeadRepository } from '@/repositories/lead.repository';
+import { PipelineRepository } from '@/repositories/pipeline.repository';
 import { PrismaPasswordResetTokenRepository } from '@/repositories/password-reset-token.repository';
 import { PrismaSessionRepository } from '@/repositories/session.repository';
 import { UserRepository } from '@/repositories/user.repository';
 import { AppRoutes } from '@/routes';
 import { AuthRoutes } from '@/routes/auth.routes';
+import { LeadRoutes } from '@/routes/lead.routes';
 import { ProfileRoutes } from '@/routes/profile.routes';
 import { UserRoutes } from '@/routes/user.routes';
 import { AuditService } from '@/services/audit.service';
 import { AuthService } from '@/services/auth.service';
+import { LeadService } from '@/services/lead.service';
 import { MailService } from '@/services/mail.service';
 import { PasswordResetService } from '@/services/password-reset.service';
 import { ProfileService } from '@/services/profile.service';
@@ -35,6 +41,7 @@ import { UserService } from '@/services/user.service';
 
 export const prisma = new PrismaClient();
 const clock = new SystemClock();
+const businessCalendar = new TimeZoneBusinessCalendar(clock, env.APP_TIME_ZONE);
 const mailer = new SmtpMailer({
   host: env.SMTP_HOST,
   port: env.SMTP_PORT,
@@ -50,6 +57,8 @@ const userRepository = new UserRepository(prisma);
 const sessionRepository = new PrismaSessionRepository(prisma);
 const passwordResetTokenRepository = new PrismaPasswordResetTokenRepository(prisma);
 const auditLogRepository = new PrismaAuditLogRepository(prisma);
+const leadRepository = new LeadRepository(prisma);
+const pipelineRepository = new PipelineRepository(prisma);
 
 const passwordHasher = new Argon2PasswordHasher({
   memoryKib: env.ARGON2_MEMORY_KIB,
@@ -72,6 +81,14 @@ const passwordResetService = new PasswordResetService(
   { appUrl: env.APP_URL, tokenTtlMinutes: env.PASSWORD_RESET_TTL_MINUTES },
 );
 const profileService = new ProfileService(userRepository);
+const leadService = new LeadService(
+  leadRepository,
+  pipelineRepository,
+  userRepository,
+  auditService,
+  businessCalendar,
+  clock,
+);
 
 const authMiddleware = new AuthMiddleware(sessionService, sessionCookie);
 const errorMiddleware = new ErrorMiddleware();
@@ -89,6 +106,7 @@ const authController = new AuthController(authService, requestContextExtractor, 
 const passwordController = new PasswordController(passwordResetService, requestContextExtractor);
 const userController = new UserController(userService, requestContextExtractor);
 const profileController = new ProfileController(profileService, requestContextExtractor);
+const leadController = new LeadController(leadService, requestContextExtractor);
 
 const appRoutes = new AppRoutes(
   healthController,
@@ -96,6 +114,7 @@ const appRoutes = new AppRoutes(
     auth: new AuthRoutes(authController, passwordController, rateLimitMiddleware, validationMiddleware),
     profile: new ProfileRoutes(profileController, validationMiddleware),
     users: new UserRoutes(userController, authMiddleware, validationMiddleware),
+    leads: new LeadRoutes(leadController, authMiddleware, validationMiddleware),
   },
   authMiddleware,
   rateLimitMiddleware,

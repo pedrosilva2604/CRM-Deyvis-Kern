@@ -4,6 +4,12 @@ import type { AppError } from '@/errors/app-errors';
 
 type InvalidInputError = () => AppError;
 
+const VALIDATED_QUERY_KEY = 'validatedQuery';
+
+export function readValidatedQuery<TQuery>(res: Response): TQuery {
+  return res.locals[VALIDATED_QUERY_KEY] as TQuery;
+}
+
 export class ValidationMiddleware {
   validateBody =
     <T>(schema: ZodType<T, ZodTypeDef, unknown>, invalidInputError?: InvalidInputError) =>
@@ -19,6 +25,15 @@ export class ValidationMiddleware {
     (req: Request, _res: Response, next: NextFunction) => {
       const result = schema.safeParse(req.params);
       if (!result.success) throw result.error;
+      next();
+    };
+
+  validateQuery =
+    <T>(schema: ZodType<T, ZodTypeDef, unknown>) =>
+    (req: Request, res: Response, next: NextFunction) => {
+      const result = schema.safeParse(req.query);
+      if (!result.success) throw result.error;
+      res.locals[VALIDATED_QUERY_KEY] = result.data;
       next();
     };
 }
