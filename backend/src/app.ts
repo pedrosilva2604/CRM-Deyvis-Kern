@@ -7,6 +7,7 @@ import type { ErrorMiddleware } from '@/middlewares/error.middleware';
 export interface AppConfig {
   corsOrigin: string;
   jsonBodyLimit: string;
+  trustedProxies: string | number;
   production: boolean;
 }
 
@@ -27,7 +28,7 @@ export class App {
 
   private configureSecurity() {
     this.express.disable('x-powered-by');
-    this.express.set('trust proxy', 'loopback');
+    this.express.set('trust proxy', this.config.trustedProxies);
     this.express.use(helmet());
     this.express.use(cors({ origin: this.config.corsOrigin, credentials: true }));
   }

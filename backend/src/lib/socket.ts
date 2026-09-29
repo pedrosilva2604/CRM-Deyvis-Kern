@@ -22,6 +22,10 @@ export class SocketGateway {
     return this.server;
   }
 
+  async closeSocketsAndHttpServer(): Promise<void> {
+    await new Promise<void>((resolve) => this.io.close(() => resolve()));
+  }
+
   private authenticateSocket = async (socket: Socket, next: (err?: Error) => void) => {
     try {
       const token = this.sessionCookie.readSessionToken(socket.handshake.headers.cookie) ?? '';

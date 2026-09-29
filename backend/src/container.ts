@@ -33,7 +33,7 @@ import { SessionService } from '@/services/session.service';
 import { JwtTokenService } from '@/services/token.service';
 import { UserService } from '@/services/user.service';
 
-const prisma = new PrismaClient();
+export const prisma = new PrismaClient();
 const clock = new SystemClock();
 const mailer = new SmtpMailer({
   host: env.SMTP_HOST,
@@ -102,7 +102,12 @@ const appRoutes = new AppRoutes(
 );
 
 export const app = new App(
-  { corsOrigin: env.CORS_ORIGIN, jsonBodyLimit: env.JSON_BODY_LIMIT, production: env.NODE_ENV === 'production' },
+  {
+    corsOrigin: env.CORS_ORIGIN,
+    jsonBodyLimit: env.JSON_BODY_LIMIT,
+    trustedProxies: env.TRUST_PROXY,
+    production: env.NODE_ENV === 'production',
+  },
   appRoutes.router,
   errorMiddleware,
 );

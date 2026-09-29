@@ -10,6 +10,10 @@ const envSchema = z.object({
   APP_URL: z.string().url(),
   CORS_ORIGIN: z.string().url(),
   JSON_BODY_LIMIT: z.string().min(1),
+  TRUST_PROXY: z
+    .string()
+    .min(1)
+    .transform((value) => (/^\d+$/.test(value) ? Number(value) : value)),
   DATABASE_URL: z.string().url(),
 
   JWT_SECRET: z.string().min(32),
