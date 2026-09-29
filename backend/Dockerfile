@@ -5,9 +5,10 @@ WORKDIR /app
 
 FROM base AS build
 COPY package.json package-lock.json ./
+COPY shared/package.json shared/
 COPY backend/package.json backend/
-COPY frontend/package.json frontend/
 RUN npm ci --workspace backend --ignore-scripts
+COPY shared/ shared/
 COPY backend/ backend/
 RUN npx --workspace backend prisma generate \
   && npm run build --workspace backend
@@ -18,8 +19,8 @@ CMD ["npx", "prisma", "migrate", "deploy"]
 
 FROM base AS production-dependencies
 COPY package.json package-lock.json ./
+COPY shared/package.json shared/
 COPY backend/package.json backend/
-COPY frontend/package.json frontend/
 RUN npm ci --workspace backend --omit=dev --omit=optional --ignore-scripts \
   && mkdir -p backend/node_modules
 
@@ -32,7 +33,6 @@ COPY --from=build --chown=node:node /app/backend/package.json ./backend/package.
 COPY --from=build --chown=node:node /app/backend/dist ./backend/dist
 WORKDIR /app/backend
 USER node
-EXPOSE 3333
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:' + process.env.PORT + '/api/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
 STOPSIGNAL SIGTERM
