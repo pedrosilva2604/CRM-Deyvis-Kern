@@ -11,6 +11,14 @@ export const USER_ERRORS = {
   LAST_ADMIN: 'O CRM precisa de pelo menos um administrador ativo',
 } as const;
 
+export const LEAD_ERRORS = {
+  NOT_FOUND: 'Lead não encontrado',
+  PHONE_IN_USE: 'Já existe um lead com este telefone',
+  EMAIL_IN_USE: 'Já existe um lead com este e-mail',
+  STAGE_NOT_FOUND: 'Etapa do funil não encontrada',
+  ASSIGNEE_NOT_AVAILABLE: 'Responsável não encontrado ou desativado',
+} as const;
+
 export const PASSWORD_RESET_ERRORS = {
   INVALID_LINK: 'Link inválido ou expirado. Solicite uma nova redefinição de senha.',
 } as const;

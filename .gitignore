@@ -12,13 +12,13 @@ Thumbs.db
 !.env.example
 
 *.sql
+!backend/prisma/migrations/*/migration.sql
 *.sqlite
 *.sqlite3
 *.db
 *.dump
 *.backup
 *.bak
-backend/prisma/migrations/
 
 *.pem
 *.key
