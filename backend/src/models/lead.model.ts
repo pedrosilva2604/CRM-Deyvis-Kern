@@ -110,6 +110,12 @@ export interface UpdateLeadRequest {
   leadChanges: UpdateLeadInput;
 }
 
+export type UpdatableLeadField = keyof UpdateLeadInput;
+
+export interface LeadUpdateResult {
+  updatedFields: UpdatableLeadField[];
+}
+
 export interface DeleteLeadRequest {
   targetLeadId: string;
 }

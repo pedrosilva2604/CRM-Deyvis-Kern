@@ -22,7 +22,7 @@ export interface ILeadRepository {
   countLeadBaseIndicators(newLeadsSince: Date): Promise<LeadBaseIndicators>;
   findSourcesInUse(): Promise<string[]>;
   createLead(newLead: CreateLeadData): Promise<LeadOutput>;
-  updateLead(leadId: string, leadChanges: UpdateLeadData): Promise<LeadOutput>;
+  updateLead(leadId: string, leadChanges: UpdateLeadData): Promise<void>;
   softDeleteLead(leadId: string, deletedAt: Date): Promise<void>;
 }
 
@@ -115,16 +115,11 @@ export class LeadRepository implements ILeadRepository {
     }
   }
 
-  async updateLead(leadId: string, leadChanges: UpdateLeadData): Promise<LeadOutput> {
+  async updateLead(leadId: string, leadChanges: UpdateLeadData): Promise<void> {
     try {
-      const updatedLead = await this.prisma.lead.update({
-        where: { id: leadId },
-        data: leadChanges,
-        include: leadOutputRelations,
-      });
-      return toLeadOutput(updatedLead);
+      await this.prisma.lead.update({ where: { id: leadId }, data: leadChanges, select: { id: true } });
     } catch (error) {
-      return translateUniqueViolation(error);
+      translateUniqueViolation(error);
     }
   }
 
