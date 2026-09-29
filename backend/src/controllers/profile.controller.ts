@@ -6,12 +6,12 @@ import type { IProfileService } from '@/services/profile.service';
 export class ProfileController {
   constructor(
     private readonly profileService: IProfileService,
-    private readonly request: RequestContextExtractor,
+    private readonly requestContextExtractor: RequestContextExtractor,
   ) {}
 
   updateUserTheme = async (req: Request, res: Response) => {
-    const input: UpdateThemeInput = req.body;
-    const user = await this.profileService.updateUserTheme(this.request.extractAuthUser(req), input);
+    const chosenTheme: UpdateThemeInput = req.body;
+    const user = await this.profileService.updateUserTheme(this.requestContextExtractor.extractLoggedUser(req), chosenTheme);
     res.status(200).json(user);
   };
 }

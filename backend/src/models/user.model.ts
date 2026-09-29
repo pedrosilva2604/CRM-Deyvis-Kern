@@ -11,10 +11,6 @@ export interface UpdateThemeInput {
   theme: Theme;
 }
 
-export interface UpdateUserStatusInput {
-  active: boolean;
-}
-
 export interface UpdateUserInput {
   name?: string;
   email?: string;
@@ -30,9 +26,12 @@ export interface UpdateUserRequest {
   data: UpdateUserInput;
 }
 
-export interface UpdateUserStatusRequest {
+export interface ActivateUserRequest {
   targetUserId: string;
-  data: UpdateUserStatusInput;
+}
+
+export interface DeactivateUserRequest {
+  targetUserId: string;
 }
 
 export interface UpdateUserPasswordInput {

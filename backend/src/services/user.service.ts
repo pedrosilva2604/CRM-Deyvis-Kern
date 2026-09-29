@@ -2,15 +2,16 @@ import { Role } from '@prisma/client';
 import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from '@/errors/app-errors';
 import { AUTH_ERRORS, USER_ERRORS } from '@/errors/errors.constants';
 import type { AuditLogInput } from '@/models/audit.model';
-import type { AuthenticatedContext } from '@/models/common.model';
+import type { LoggedUserContext } from '@/models/common.model';
 import type {
+  ActivateUserRequest,
+  DeactivateUserRequest,
   DeleteUserRequest,
   RegisteredUserOutput,
   RegisterUserInput,
   UpdateUserInput,
   UpdateUserPasswordRequest,
   UpdateUserRequest,
-  UpdateUserStatusRequest,
 } from '@/models/user.model';
 import type { IUserRepository } from '@/repositories/user.repository';
 import type { IAuditService } from './audit.service';
@@ -18,12 +19,13 @@ import type { IPasswordHasher } from '@/lib/password-hasher';
 import type { ISessionService } from './session.service';
 
 export interface IUserService {
-  registerUser(input: RegisterUserInput, ctx: AuthenticatedContext): Promise<RegisteredUserOutput>;
-  listUsers(ctx: AuthenticatedContext): Promise<RegisteredUserOutput[]>;
-  updateUser(request: UpdateUserRequest, ctx: AuthenticatedContext): Promise<RegisteredUserOutput>;
-  updateUserStatus(request: UpdateUserStatusRequest, ctx: AuthenticatedContext): Promise<RegisteredUserOutput>;
-  updateUserPassword(request: UpdateUserPasswordRequest, ctx: AuthenticatedContext): Promise<void>;
-  deleteUser(request: DeleteUserRequest, ctx: AuthenticatedContext): Promise<void>;
+  registerUser(newUserRegistration: RegisterUserInput, loggedUserContext: LoggedUserContext): Promise<RegisteredUserOutput>;
+  listUsers(loggedUserContext: LoggedUserContext): Promise<RegisteredUserOutput[]>;
+  updateUser(request: UpdateUserRequest, loggedUserContext: LoggedUserContext): Promise<RegisteredUserOutput>;
+  activateUser(request: ActivateUserRequest, loggedUserContext: LoggedUserContext): Promise<RegisteredUserOutput>;
+  deactivateUser(request: DeactivateUserRequest, loggedUserContext: LoggedUserContext): Promise<RegisteredUserOutput>;
+  updateUserPassword(request: UpdateUserPasswordRequest, loggedUserContext: LoggedUserContext): Promise<void>;
+  deleteUser(request: DeleteUserRequest, loggedUserContext: LoggedUserContext): Promise<void>;
 }
 
 export interface IUserPasswordUpdater {
@@ -38,57 +40,70 @@ export class UserService implements IUserService, IUserPasswordUpdater {
     private readonly audit: IAuditService,
   ) {}
 
-  async registerUser(input: RegisterUserInput, ctx: AuthenticatedContext): Promise<RegisteredUserOutput> {
-    this.assertActorIsAdmin(ctx);
-    await this.assertEmailIsAvailable(input.email);
+  async registerUser(newUserRegistration: RegisterUserInput, loggedUserContext: LoggedUserContext): Promise<RegisteredUserOutput> {
+    this.assertLoggedUserIsAdmin(loggedUserContext);
+    await this.assertEmailIsAvailable(newUserRegistration.email);
 
-    const user = await this.createUser(input);
-    await this.recordUserAuditLog(ctx, 'user.create', user.id, { name: user.name, email: user.email, role: user.role });
-    return user;
+    const registeredUser = await this.createUser(newUserRegistration);
+    await this.recordUserAuditLog(loggedUserContext, 'user.create', registeredUser.id, {
+      name: registeredUser.name,
+      email: registeredUser.email,
+      role: registeredUser.role,
+    });
+    return registeredUser;
   }
 
-  async listUsers(ctx: AuthenticatedContext): Promise<RegisteredUserOutput[]> {
-    this.assertActorIsAdmin(ctx);
+  async listUsers(loggedUserContext: LoggedUserContext): Promise<RegisteredUserOutput[]> {
+    this.assertLoggedUserIsAdmin(loggedUserContext);
     return await this.userRepository.findAllUsers();
   }
 
   async updateUser(
     { targetUserId, data }: UpdateUserRequest,
-    ctx: AuthenticatedContext,
+    loggedUserContext: LoggedUserContext,
   ): Promise<RegisteredUserOutput> {
-    this.assertActorIsAdmin(ctx);
+    this.assertLoggedUserIsAdmin(loggedUserContext);
     const targetUser = await this.findExistingUserOrFail(targetUserId);
     if (this.isChangingEmail(targetUser, data)) await this.assertEmailIsAvailable(data.email);
-    if (this.isLosingAdminRole(targetUser, data)) await this.assertCanRemoveAdmin(targetUser, ctx);
+    if (this.isLosingAdminRole(targetUser, data)) await this.assertCanRemoveAdmin(targetUser, loggedUserContext);
 
     const updated = await this.userRepository.updateUser(targetUserId, data);
-    await this.recordUserAuditLog(ctx, 'user.update', targetUserId, { ...data });
+    await this.recordUserAuditLog(loggedUserContext, 'user.update', targetUserId, { ...data });
     return updated;
   }
 
-  async updateUserStatus(
-    { targetUserId, data }: UpdateUserStatusRequest,
-    ctx: AuthenticatedContext,
-  ): Promise<RegisteredUserOutput> {
-    this.assertActorIsAdmin(ctx);
-    const targetUser = await this.findExistingUserOrFail(targetUserId);
-    if (!data.active) await this.assertCanRemoveAdmin(targetUser, ctx);
+  async activateUser({ targetUserId }: ActivateUserRequest, loggedUserContext: LoggedUserContext): Promise<RegisteredUserOutput> {
+    this.assertLoggedUserIsAdmin(loggedUserContext);
+    await this.findExistingUserOrFail(targetUserId);
 
-    const updated = await this.userRepository.updateUserStatus(targetUserId, data.active);
-    if (!data.active) await this.sessions.endAllUserSessions(targetUserId);
-    await this.recordUserAuditLog(ctx, 'user.status_update', targetUserId, { active: data.active });
-    return updated;
+    const activated = await this.userRepository.activateUser(targetUserId);
+    await this.recordUserAuditLog(loggedUserContext, 'user.activate', targetUserId, undefined);
+    return activated;
+  }
+
+  async deactivateUser(
+    { targetUserId }: DeactivateUserRequest,
+    loggedUserContext: LoggedUserContext,
+  ): Promise<RegisteredUserOutput> {
+    this.assertLoggedUserIsAdmin(loggedUserContext);
+    const targetUser = await this.findExistingUserOrFail(targetUserId);
+    await this.assertCanRemoveAdmin(targetUser, loggedUserContext);
+
+    const deactivated = await this.userRepository.deactivateUser(targetUserId);
+    await this.sessions.endAllUserSessions(targetUserId);
+    await this.recordUserAuditLog(loggedUserContext, 'user.deactivate', targetUserId, undefined);
+    return deactivated;
   }
 
   async updateUserPassword(
     { targetUserId, data }: UpdateUserPasswordRequest,
-    ctx: AuthenticatedContext,
+    loggedUserContext: LoggedUserContext,
   ): Promise<void> {
-    this.assertActorIsAdmin(ctx);
+    this.assertLoggedUserIsAdmin(loggedUserContext);
     await this.findExistingUserOrFail(targetUserId);
 
     await this.replaceUserPassword(targetUserId, data.password);
-    await this.recordUserAuditLog(ctx, 'user.password_update', targetUserId, undefined);
+    await this.recordUserAuditLog(loggedUserContext, 'user.password_update', targetUserId, undefined);
   }
 
   async replaceUserPassword(userId: string, password: string): Promise<void> {
@@ -96,21 +111,21 @@ export class UserService implements IUserService, IUserPasswordUpdater {
     await this.sessions.endAllUserSessions(userId);
   }
 
-  async deleteUser({ targetUserId }: DeleteUserRequest, ctx: AuthenticatedContext): Promise<void> {
-    this.assertActorIsAdmin(ctx);
+  async deleteUser({ targetUserId }: DeleteUserRequest, loggedUserContext: LoggedUserContext): Promise<void> {
+    this.assertLoggedUserIsAdmin(loggedUserContext);
     const targetUser = await this.findExistingUserOrFail(targetUserId);
-    await this.assertCanRemoveAdmin(targetUser, ctx);
+    await this.assertCanRemoveAdmin(targetUser, loggedUserContext);
 
     await this.userRepository.deleteUser(targetUserId);
-    await this.recordUserAuditLog(ctx, 'user.delete', targetUserId, {
+    await this.recordUserAuditLog(loggedUserContext, 'user.delete', targetUserId, {
       name: targetUser.name,
       email: targetUser.email,
       role: targetUser.role,
     });
   }
 
-  private assertActorIsAdmin({ actor }: AuthenticatedContext): void {
-    if (actor.role !== Role.ADMIN) throw new ForbiddenError(AUTH_ERRORS.ACCESS_DENIED);
+  private assertLoggedUserIsAdmin({ loggedUser }: LoggedUserContext): void {
+    if (loggedUser.role !== Role.ADMIN) throw new ForbiddenError(AUTH_ERRORS.ACCESS_DENIED);
   }
 
   private async createUser({ name, email, password, role }: RegisterUserInput): Promise<RegisteredUserOutput> {
@@ -129,8 +144,8 @@ export class UserService implements IUserService, IUserPasswordUpdater {
     if (existing) throw new ConflictError(USER_ERRORS.EMAIL_IN_USE);
   }
 
-  private async assertCanRemoveAdmin(targetUser: RegisteredUserOutput, { actor }: AuthenticatedContext): Promise<void> {
-    if (targetUser.id === actor.id) throw new BadRequestError(USER_ERRORS.SELF_ACTION);
+  private async assertCanRemoveAdmin(targetUser: RegisteredUserOutput, { loggedUser }: LoggedUserContext): Promise<void> {
+    if (targetUser.id === loggedUser.id) throw new BadRequestError(USER_ERRORS.SELF_ACTION);
     if (await this.isLastActiveAdmin(targetUser)) throw new BadRequestError(USER_ERRORS.LAST_ADMIN);
   }
 
@@ -151,11 +166,11 @@ export class UserService implements IUserService, IUserPasswordUpdater {
   }
 
   private async recordUserAuditLog(
-    ctx: AuthenticatedContext,
+    loggedUserContext: LoggedUserContext,
     action: string,
     targetUserId: string,
     details: AuditLogInput['details'],
   ): Promise<void> {
-    await this.audit.recordAuditLog(ctx, { action, entity: 'User', entityId: targetUserId, details });
+    await this.audit.recordAuditLog(loggedUserContext, { action, entity: 'User', entityId: targetUserId, details });
   }
 }

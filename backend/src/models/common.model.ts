@@ -1,14 +1,14 @@
 import type { AuthUser } from './auth.model';
 
-export interface RequestContext {
+export interface RequestOrigin {
   userId?: string;
   ip?: string;
   userAgent?: string;
 }
 
-export interface AuthenticatedContext extends RequestContext {
+export interface LoggedUserContext extends RequestOrigin {
   userId: string;
-  actor: AuthUser;
+  loggedUser: AuthUser;
 }
 
 export interface MessageOutput {

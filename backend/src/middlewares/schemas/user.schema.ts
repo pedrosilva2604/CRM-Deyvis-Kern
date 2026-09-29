@@ -5,7 +5,6 @@ import type {
   UpdateThemeInput,
   UpdateUserInput,
   UpdateUserPasswordInput,
-  UpdateUserStatusInput,
   UserIdParams,
 } from '@/models/user.model';
 import { emailSchema, newPasswordSchema } from './common.schema';
@@ -29,12 +28,6 @@ export const updateUserSchema: ZodType<UpdateUserInput, ZodTypeDef, unknown> = z
   .refine((data) => Object.values(data).some((value) => value !== undefined), {
     message: 'Informe ao menos um campo para atualizar',
   });
-
-export const updateUserStatusSchema: ZodType<UpdateUserStatusInput, ZodTypeDef, unknown> = z
-  .object({
-    active: z.boolean({ required_error: 'Informe o status', invalid_type_error: 'Status inválido' }),
-  })
-  .strict('Campo não permitido nesta atualização');
 
 export const updateUserPasswordSchema: ZodType<UpdateUserPasswordInput, ZodTypeDef, unknown> = z
   .object({

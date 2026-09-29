@@ -5,7 +5,6 @@ import {
   registerUserSchema,
   updateUserPasswordSchema,
   updateUserSchema,
-  updateUserStatusSchema,
   userIdParamsSchema,
 } from '@/middlewares/schemas/user.schema';
 import type { ValidationMiddleware } from '@/middlewares/validation.middleware';
@@ -35,12 +34,8 @@ export class UserRoutes {
       this.validate.validateBody(updateUserSchema),
       this.users.updateUser,
     );
-    this.router.patch(
-      '/:id/status',
-      this.validate.validateParams(userIdParamsSchema),
-      this.validate.validateBody(updateUserStatusSchema),
-      this.users.updateUserStatus,
-    );
+    this.router.patch('/:id/activate', this.validate.validateParams(userIdParamsSchema), this.users.activateUser);
+    this.router.patch('/:id/deactivate', this.validate.validateParams(userIdParamsSchema), this.users.deactivateUser);
     this.router.patch(
       '/:id/password',
       this.validate.validateParams(userIdParamsSchema),

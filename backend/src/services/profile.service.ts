@@ -3,14 +3,14 @@ import { toProfileOutput, type ProfileOutput, type UpdateThemeInput } from '@/mo
 import type { IUserRepository } from '@/repositories/user.repository';
 
 export interface IProfileService {
-  updateUserTheme(authUser: AuthUser, input: UpdateThemeInput): Promise<ProfileOutput>;
+  updateUserTheme(loggedUser: AuthUser, chosenTheme: UpdateThemeInput): Promise<ProfileOutput>;
 }
 
 export class ProfileService implements IProfileService {
   constructor(private readonly userRepository: IUserRepository) {}
 
-  async updateUserTheme(authUser: AuthUser, { theme }: UpdateThemeInput): Promise<ProfileOutput> {
-    const user = await this.userRepository.updateUserTheme(authUser.id, theme);
+  async updateUserTheme(loggedUser: AuthUser, { theme }: UpdateThemeInput): Promise<ProfileOutput> {
+    const user = await this.userRepository.updateUserTheme(loggedUser.id, theme);
     return toProfileOutput(user);
   }
 }

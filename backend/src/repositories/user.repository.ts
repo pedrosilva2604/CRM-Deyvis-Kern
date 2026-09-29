@@ -19,7 +19,8 @@ export interface IUserRepository {
   countActiveAdmins(): Promise<number>;
   updateUser(id: string, data: UpdateUserData): Promise<RegisteredUserOutput>;
   updateUserTheme(id: string, theme: Theme): Promise<UserOutput>;
-  updateUserStatus(id: string, active: boolean): Promise<RegisteredUserOutput>;
+  activateUser(id: string): Promise<RegisteredUserOutput>;
+  deactivateUser(id: string): Promise<RegisteredUserOutput>;
   updateUserPassword(id: string, passwordHash: string): Promise<void>;
   deleteUser(id: string): Promise<void>;
 }
@@ -66,8 +67,13 @@ export class UserRepository implements IUserRepository {
     return toUserOutput(user);
   }
 
-  async updateUserStatus(id: string, active: boolean): Promise<RegisteredUserOutput> {
-    const user = await this.prisma.user.update({ where: { id }, data: { active } });
+  async activateUser(id: string): Promise<RegisteredUserOutput> {
+    const user = await this.prisma.user.update({ where: { id }, data: { active: true } });
+    return toRegisteredUserOutput(user);
+  }
+
+  async deactivateUser(id: string): Promise<RegisteredUserOutput> {
+    const user = await this.prisma.user.update({ where: { id }, data: { active: false } });
     return toRegisteredUserOutput(user);
   }
 
