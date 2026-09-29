@@ -6,4 +6,5 @@ function required(name: keyof ImportMetaEnv) {
 
 export const env = {
   appName: required('VITE_APP_NAME'),
+  fakeApiEnabled: import.meta.env.DEV && import.meta.env.VITE_ENABLE_API_MOCKS === 'true',
 };
