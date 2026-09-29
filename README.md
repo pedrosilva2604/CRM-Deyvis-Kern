@@ -55,7 +55,8 @@ Todos os ids do banco são UUID nativo do PostgreSQL.
 | `GET /api/users` | ADMIN | Lista os usuários |
 | `POST /api/users` | ADMIN | Cadastra um usuário |
 | `PATCH /api/users/:id` | ADMIN | Edita nome, e-mail e/ou perfil de um usuário |
-| `PATCH /api/users/:id/status` | ADMIN | Ativa ou desativa um usuário (desativar encerra as sessões dele) |
+| `PATCH /api/users/:id/activate` | ADMIN | Reativa um usuário desativado |
+| `PATCH /api/users/:id/deactivate` | ADMIN | Desativa um usuário e encerra as sessões dele (não vale para si mesmo nem para o último admin ativo) |
 | `PATCH /api/users/:id/password` | ADMIN | Define uma nova senha para o usuário e encerra as sessões dele |
 | `DELETE /api/users/:id` | ADMIN | Exclui um usuário |
 
@@ -78,6 +79,27 @@ Todos os ids do banco são UUID nativo do PostgreSQL.
 | `npm run build` | Build de produção dos dois |
 | `npm run typecheck` | Checagem de tipos dos dois |
 | `npm run db:migrate` / `db:seed` / `db:studio` | Prisma |
+
+## Deploy (produção)
+
+Cada parte roda como um serviço separado, com a sua própria imagem:
+
+| Serviço | Receita | O que faz |
+| --- | --- | --- |
+| `web` | [`frontend/Dockerfile`](frontend/Dockerfile) | nginx servindo o frontend compilado e repassando `/api` e `/socket.io` para a API (mesma origem, sem CORS) |
+| `api` | [`backend/Dockerfile`](backend/Dockerfile) (alvo `runtime`) | API Node, usuário sem privilégios, healthcheck e desligamento seguro ao receber SIGTERM |
+| `migrate` | [`backend/Dockerfile`](backend/Dockerfile) (alvo `migrator`) | Roda `prisma migrate deploy` uma vez antes da API subir |
+| `postgres`, `redis`, `evolution` | Imagens oficiais com versão fixa | Banco, Redis com senha e WhatsApp (Evolution) |
+
+A explicação de cada linha dos Dockerfiles, do nginx e do compose está em [docs/DOCKER.md](docs/DOCKER.md).
+
+[`docker-compose.prod.yml`](docker-compose.prod.yml) junta todos os serviços como referência. Só o `web` expõe porta; API, banco e Redis ficam em redes internas.
+
+1. Preencha o `.env` da raiz (compose) e crie `backend/.env.production` com as chaves do `backend/.env.example`, usando `postgres` como host do `DATABASE_URL`, `TRUST_PROXY=1` (um proxy na frente: o nginx) e `SESSION_COOKIE_SECURE=true` quando houver HTTPS.
+2. `docker compose -f docker-compose.prod.yml up -d --build`
+3. Primeiro admin: `docker compose -f docker-compose.prod.yml run --rm migrate npx tsx prisma/seed.ts`
+
+`TRUST_PROXY` diz à API quantos proxies confiáveis existem na frente dela, para ler o IP real do cliente (usado no limite de tentativas e na auditoria). Em dev fica `loopback`; atrás do nginx do `web`, `1`; se houver outro proxy na frente do nginx (plataforma de deploy, Cloudflare), aumente e ajuste o nginx para confiar nele.
 
 ## Padrão de commits
 
