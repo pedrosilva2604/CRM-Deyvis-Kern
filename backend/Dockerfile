@@ -15,6 +15,7 @@ RUN npx --workspace backend prisma generate \
 
 FROM build AS migrator
 WORKDIR /app/backend
+USER node
 CMD ["npx", "prisma", "migrate", "deploy"]
 
 FROM base AS production-dependencies
