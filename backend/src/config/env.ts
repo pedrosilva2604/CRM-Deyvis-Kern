@@ -25,6 +25,7 @@ const envSchema = z.object({
     .min(1)
     .transform((value) => (/^\d+$/.test(value) ? Number(value) : value)),
   DATABASE_URL: z.string().url(),
+  REDIS_URL: z.string().url().refine((redisUrl) => /^rediss?:\/\//.test(redisUrl), 'Use redis:// ou rediss://'),
 
   JWT_SECRET: z.string().min(32),
   SESSION_TTL_HOURS: positiveInteger,
@@ -37,9 +38,23 @@ const envSchema = z.object({
 
   RATE_LIMIT_WINDOW_MINUTES: positiveInteger,
   API_RATE_LIMIT: positiveInteger,
+  USER_API_RATE_LIMIT: positiveInteger,
   LOGIN_RATE_LIMIT: positiveInteger,
   FORGOT_PASSWORD_RATE_LIMIT: positiveInteger,
   RESET_PASSWORD_RATE_LIMIT: positiveInteger,
+
+  LEAD_IMPORT_MAX_ROWS: positiveInteger,
+  LEAD_IMPORT_MAX_FILE_BYTES: positiveInteger,
+  LEAD_IMPORT_RATE_LIMIT: positiveInteger,
+  LEAD_IMPORT_JOB_ATTEMPTS: positiveInteger,
+  LEAD_IMPORT_RETRY_DELAY_MS: positiveInteger,
+  LEAD_IMPORT_WORKER_CONCURRENCY: positiveInteger,
+  LEAD_IMPORT_CHUNK_SIZE: positiveInteger,
+  LEAD_IMPORT_RECONCILE_EVERY_MS: positiveInteger,
+  LEAD_IMPORT_STALE_AFTER_MINUTES: positiveInteger,
+  LEAD_IMPORT_FAILED_RETENTION_DAYS: positiveInteger,
+  MAINTENANCE_CRON: z.string().min(9),
+  NOTIFICATION_READ_RETENTION_DAYS: positiveInteger,
 
   EVOLUTION_API_URL: z.string().url(),
   EVOLUTION_API_KEY: z.string().min(16),

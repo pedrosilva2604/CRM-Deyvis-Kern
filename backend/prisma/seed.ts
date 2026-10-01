@@ -1,6 +1,6 @@
 import { PrismaClient, Role } from '@prisma/client';
 import { z } from 'zod';
-import { Argon2PasswordHasher } from '../src/lib/password-hasher';
+import { Argon2PasswordHasher } from '../src/infra/password-hasher';
 
 const seedEnvSchema = z.object({
   SEED_ADMIN_NAME: z.string().trim().min(2),

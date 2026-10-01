@@ -5,7 +5,7 @@ import type { RequestOrigin } from '@/models/common.model';
 import { toProfileOutput, type UserCredentials } from '@/models/user.model';
 import type { IUserRepository } from '@/repositories/user.repository';
 import type { IAuditService } from './audit.service';
-import type { IPasswordHasher } from '@/lib/password-hasher';
+import type { IPasswordHasher } from '@/infra/password-hasher';
 import type { ISessionService } from './session.service';
 
 export interface IAuthService {

@@ -63,12 +63,27 @@ export interface LeadListFilters {
   page: number;
 }
 
-export interface LeadBaseIndicators {
+export interface TotalLeadsIndicator {
   totalLeads: number;
+}
+
+export interface NewLeadsIndicator {
   newLeadsInLastSevenDays: number;
+}
+
+export interface UnassignedLeadsIndicator {
   unassignedLeads: number;
+  shareOfBase: number;
+}
+
+export interface InvalidOrRejectedContactsIndicator {
   invalidOrRejectedContacts: number;
+  shareOfBase: number;
+}
+
+export interface CompleteProfilesIndicator {
   completeProfiles: number;
+  shareOfBase: number;
 }
 
 export interface LeadFilterOptions {
@@ -77,22 +92,21 @@ export interface LeadFilterOptions {
   assignees: LeadAssignee[];
 }
 
-export interface LeadToImport {
-  name: string;
-  phone: string;
-  email: string | null;
-  source: string | null;
-  tags: string[];
-  value: string | null;
+export interface LeadImportReceipt {
+  message: string;
+  importId: string;
 }
 
-export interface ImportLeadsRequest {
-  pipelineId: string;
-  stageId: string;
-  leads: LeadToImport[];
-}
+export type LeadImportStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'EXPIRED';
 
-export interface ImportLeadsResult {
+export interface LeadImportProgress {
+  status: LeadImportStatus;
+  totalRows: number;
+  invalidRows: number;
+  duplicateRowsInFile: number;
+  rowsToImport: number;
   importedLeads: number;
-  skippedDuplicateLeads: number;
+  skippedExistingLeads: number;
+  createdAt: string;
+  finishedAt: string | null;
 }

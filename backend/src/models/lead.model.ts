@@ -45,19 +45,19 @@ export interface LeadListFilters {
   pageSize: number;
 }
 
+export type LeadSearch =
+  | { searchedBy: 'phone'; internationalPhone: string }
+  | { searchedBy: 'words'; words: string };
+
+export interface LeadListQuery extends Omit<LeadListFilters, 'search'> {
+  search?: LeadSearch;
+}
+
 export interface LeadListPage {
   leads: LeadOutput[];
   totalMatchingLeads: number;
   page: number;
   pageSize: number;
-}
-
-export interface LeadBaseIndicators {
-  totalLeads: number;
-  newLeadsInLastSevenDays: number;
-  unassignedLeads: number;
-  invalidOrRejectedContacts: number;
-  completeProfiles: number;
 }
 
 export interface LeadPipelineOption {
@@ -138,6 +138,8 @@ export type UpdateLeadData = Partial<Omit<CreateLeadData, 'pipelineId'>> & {
   pipelineId?: string;
   contactStatus?: LeadContactStatus;
 };
+
+export const notDeletedLeads = { deletedAt: null } satisfies Prisma.LeadWhereInput;
 
 export const leadOutputRelations = {
   pipeline: { select: { id: true, name: true } },

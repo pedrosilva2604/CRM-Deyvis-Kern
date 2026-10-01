@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { BadRequestError } from '@/errors/app-errors';
+import { BadRequestError, NotFoundError } from '@/errors/app-errors';
 import { PASSWORD_RESET_ERRORS } from '@/errors/errors.constants';
-import type { Clock } from '@/lib/clock';
+import type { Clock } from '@/infra/clock';
 import type { ForgotPasswordInput, ResetPasswordInput } from '@/models/auth.model';
 import type { RequestOrigin } from '@/models/common.model';
 import type { PasswordResetTokenRecord } from '@/models/password-reset.model';
@@ -47,7 +47,7 @@ export class PasswordResetService implements IPasswordResetService {
   async resetPassword({ token, password }: ResetPasswordInput, requestOrigin: RequestOrigin): Promise<void> {
     const record = await this.findUsableResetToken(token);
     await this.consumeResetToken(record);
-    await this.passwordUpdater.replaceUserPassword(record.userId, password);
+    await this.replacePasswordOfTokenOwner(record.userId, password);
     await this.audit.recordAuditLog({ ...requestOrigin, userId: record.userId }, { action: 'auth.password_reset', entity: 'User', entityId: record.userId });
   }
 
@@ -68,6 +68,15 @@ export class PasswordResetService implements IPasswordResetService {
   private async consumeResetToken(record: PasswordResetTokenRecord): Promise<void> {
     const consumed = await this.resetTokens.markResetTokenAsUsed(record.id);
     if (!consumed) throw new BadRequestError(PASSWORD_RESET_ERRORS.INVALID_LINK);
+  }
+
+  private async replacePasswordOfTokenOwner(userId: string, password: string): Promise<void> {
+    try {
+      await this.passwordUpdater.replaceUserPassword(userId, password);
+    } catch (error) {
+      if (error instanceof NotFoundError) throw new BadRequestError(PASSWORD_RESET_ERRORS.INVALID_LINK);
+      throw error;
+    }
   }
 
   private async sendResetLink(user: Recipient, token: string): Promise<void> {

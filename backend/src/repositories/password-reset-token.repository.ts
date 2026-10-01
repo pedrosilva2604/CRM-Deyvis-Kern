@@ -1,5 +1,5 @@
-import type { PrismaClient } from '@prisma/client';
 import type { PasswordResetTokenRecord } from '@/models/password-reset.model';
+import type { DatabaseClient } from '@/repositories/database-client';
 
 export interface IPasswordResetTokenRepository {
   replaceUserResetToken(userId: string, tokenHash: string, expiresAt: Date): Promise<void>;
@@ -8,7 +8,7 @@ export interface IPasswordResetTokenRepository {
 }
 
 export class PrismaPasswordResetTokenRepository implements IPasswordResetTokenRepository {
-  constructor(private readonly db: PrismaClient) {}
+  constructor(private readonly db: DatabaseClient) {}
 
   async replaceUserResetToken(userId: string, tokenHash: string, expiresAt: Date): Promise<void> {
     await this.db.$transaction([

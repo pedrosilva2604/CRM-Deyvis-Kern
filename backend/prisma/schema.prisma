@@ -35,6 +35,8 @@ model User {
   sentMessages        Message[]
   campaigns           Campaign[]
   sales               Sale[]
+  leadImports         LeadImport[]
+  notifications       Notification[]
 }
 
 model Session {
@@ -113,9 +115,10 @@ model Pipeline {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  stages    Stage[]
-  leads     Lead[]
-  campaigns Campaign[]
+  stages      Stage[]
+  leads       Lead[]
+  campaigns   Campaign[]
+  leadImports LeadImport[]
 }
 
 model Stage {
@@ -129,8 +132,9 @@ model Stage {
   isLost     Boolean  @default(false)
   createdAt  DateTime @default(now())
 
-  leads     Lead[]
-  campaigns Campaign[]
+  leads       Lead[]
+  campaigns   Campaign[]
+  leadImports LeadImport[]
 
   @@index([pipelineId])
 }
@@ -142,30 +146,31 @@ enum LeadContactStatus {
 }
 
 model Lead {
-  id            String            @id @default(uuid()) @db.Uuid
+  id            String                   @id @default(uuid()) @db.Uuid
   name          String
-  phone         String            @unique
+  phone         String                   @unique
   phoneCountry  String?
-  email         String?           @unique
+  email         String?                  @unique
   source        String?
-  tags          String[]          @default([])
-  value         Decimal?          @db.Decimal(12, 2)
-  contactStatus LeadContactStatus @default(VALID)
-  enteredOn     DateTime          @db.Date
-  position      Int               @default(0)
-  pipelineId    String            @db.Uuid
-  pipeline      Pipeline          @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
-  stageId       String            @db.Uuid
-  stage         Stage             @relation(fields: [stageId], references: [id])
-  assignedToId  String?           @db.Uuid
-  assignedTo    User?             @relation("LeadAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
-  instanceId    String?           @db.Uuid
-  instance      WhatsappInstance? @relation(fields: [instanceId], references: [id], onDelete: SetNull)
-  unreadCount   Int               @default(0)
+  tags          String[]                 @default([])
+  value         Decimal?                 @db.Decimal(12, 2)
+  contactStatus LeadContactStatus        @default(VALID)
+  enteredOn     DateTime                 @db.Date
+  position      Int                      @default(0)
+  pipelineId    String                   @db.Uuid
+  pipeline      Pipeline                 @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  stageId       String                   @db.Uuid
+  stage         Stage                    @relation(fields: [stageId], references: [id])
+  assignedToId  String?                  @db.Uuid
+  assignedTo    User?                    @relation("LeadAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  instanceId    String?                  @db.Uuid
+  instance      WhatsappInstance?        @relation(fields: [instanceId], references: [id], onDelete: SetNull)
+  unreadCount   Int                      @default(0)
   lastMessageAt DateTime?
-  createdAt     DateTime          @default(now())
-  updatedAt     DateTime          @updatedAt
+  createdAt     DateTime                 @default(now())
+  updatedAt     DateTime                 @updatedAt
   deletedAt     DateTime?
+  searchVector  Unsupported("tsvector")? @default(dbgenerated())
 
   messages   Message[]
   recipients CampaignRecipient[]
@@ -178,6 +183,79 @@ model Lead {
   @@index([source])
   @@index([enteredOn])
   @@index([deletedAt, createdAt])
+  @@index([searchVector], type: Gin)
+}
+
+enum LeadImportStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  EXPIRED
+}
+
+model LeadImport {
+  id                   String           @id @default(uuid()) @db.Uuid
+  status               LeadImportStatus @default(PENDING)
+  totalRows            Int
+  invalidRows          Int
+  duplicateRowsInFile  Int
+  rowsToImport         Int
+  importedLeads        Int              @default(0)
+  skippedExistingLeads Int              @default(0)
+  processedRows        Int              @default(0)
+  pipelineId           String           @db.Uuid
+  pipeline             Pipeline         @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  stageId              String           @db.Uuid
+  stage                Stage            @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  requestedById        String?          @db.Uuid
+  requestedBy          User?            @relation(fields: [requestedById], references: [id], onDelete: SetNull)
+  failureReason        String?
+  createdAt            DateTime         @default(now())
+  startedAt            DateTime?
+  finishedAt           DateTime?
+  expiryWarningSentAt  DateTime?
+
+  rows LeadImportRow[]
+
+  @@index([status, createdAt])
+  @@index([status, finishedAt])
+  @@index([requestedById])
+}
+
+enum NotificationType {
+  LEAD_IMPORT_COMPLETED
+  LEAD_IMPORT_FAILED
+  LEAD_IMPORT_EXPIRING
+  LEAD_IMPORT_EXPIRED
+}
+
+model Notification {
+  id        String           @id @default(uuid()) @db.Uuid
+  userId    String           @db.Uuid
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  title     String
+  message   String
+  actionUrl String?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  @@index([userId, readAt, createdAt])
+}
+
+model LeadImportRow {
+  id           String     @id @default(uuid()) @db.Uuid
+  leadImportId String     @db.Uuid
+  leadImport   LeadImport @relation(fields: [leadImportId], references: [id], onDelete: Cascade)
+  rowNumber    Int
+  name         String
+  phone        String
+  phoneCountry String?
+  email        String?
+  enteredOn    DateTime   @db.Date
+
+  @@index([leadImportId, rowNumber])
 }
 
 enum MessageDirection {

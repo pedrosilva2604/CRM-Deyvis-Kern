@@ -1,11 +1,12 @@
 import { createServer } from 'node:http';
 import { env } from '@/config/env';
-import { app, prisma, socketGateway } from '@/container';
+import { app, leadImportQueue, prisma, queueRedisClient, realtimeEventRelay, socketGateway } from '@/container';
 
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 
 const httpServer = createServer(app.express);
 socketGateway.attachToServer(httpServer);
+await realtimeEventRelay.start();
 
 httpServer.listen(env.PORT, () => {
   console.log(`API rodando em http://localhost:${env.PORT}/api`);
@@ -25,6 +26,9 @@ async function shutDownGracefully(reason: string, exitCode: number): Promise<voi
   forcedExitTimer.unref();
 
   await socketGateway.closeSocketsAndHttpServer();
+  await realtimeEventRelay.close();
+  await leadImportQueue.close();
+  await queueRedisClient.quit();
   await prisma.$disconnect();
   process.exit(exitCode);
 }

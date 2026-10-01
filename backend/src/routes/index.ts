@@ -4,6 +4,7 @@ import type { AuthMiddleware } from '@/middlewares/auth.middleware';
 import type { RateLimitMiddleware } from '@/middlewares/rate-limit.middleware';
 import type { AuthRoutes } from './auth.routes';
 import type { LeadRoutes } from './lead.routes';
+import type { NotificationRoutes } from './notification.routes';
 import type { ProfileRoutes } from './profile.routes';
 import type { UserRoutes } from './user.routes';
 
@@ -12,6 +13,7 @@ export interface RouteGroups {
   profile: ProfileRoutes;
   users: UserRoutes;
   leads: LeadRoutes;
+  notifications: NotificationRoutes;
 }
 
 export class AppRoutes {
@@ -26,6 +28,7 @@ export class AppRoutes {
     this.router.use(this.rateLimit.apiLimiter);
     this.registerPublicRoutes();
     this.router.use(this.authMiddleware.authenticate);
+    this.router.use(this.rateLimit.loggedUserApiLimiter);
     this.registerProtectedRoutes();
   }
 
@@ -39,5 +42,6 @@ export class AppRoutes {
     this.router.use('/profile', this.groups.profile.router);
     this.router.use('/users', this.groups.users.router);
     this.router.use('/leads', this.groups.leads.router);
+    this.router.use('/notifications', this.groups.notifications.router);
   }
 }

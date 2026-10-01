@@ -1,6 +1,8 @@
 import type { Request, Response } from 'express';
-import type { RequestContextExtractor } from '@/lib/request-context-extractor';
-import type { SessionCookie } from '@/lib/session-cookie';
+import { AUTH_SUCCESS_MESSAGES } from '@/constants/success-messages';
+import { HttpStatus, sendSuccessMessage } from '@/infra/http-status';
+import type { RequestContextExtractor } from '@/infra/request-context-extractor';
+import type { SessionCookie } from '@/infra/session-cookie';
 import type { LoginInput, SessionOutput } from '@/models/auth.model';
 import type { IAuthService } from '@/services/auth.service';
 
@@ -13,19 +15,23 @@ export class AuthController {
 
   loginUser = async (req: Request, res: Response) => {
     const loginCredentials: LoginInput = req.body;
-    const { token, ...session } = await this.authService.loginUser(loginCredentials, this.requestContextExtractor.extractRequestOrigin(req));
+    const requestOrigin = this.requestContextExtractor.extractRequestOrigin(req);
+    const { token, ...session } = await this.authService.loginUser(loginCredentials, requestOrigin);
     this.sessionCookie.writeSessionToken(res, token, session.expiresAt);
-    res.status(200).json(session satisfies SessionOutput);
+    res.status(HttpStatus.OK).json(session satisfies SessionOutput);
   };
 
   getLoggedUser = async (req: Request, res: Response) => {
-    const session = await this.authService.getLoggedUser(this.requestContextExtractor.extractLoggedUser(req));
-    res.status(200).json(session);
+    const loggedUser = this.requestContextExtractor.extractLoggedUser(req);
+    const session = await this.authService.getLoggedUser(loggedUser);
+    res.status(HttpStatus.OK).json(session);
   };
 
   logoutUser = async (req: Request, res: Response) => {
-    await this.authService.logoutUser(this.requestContextExtractor.extractLoggedUser(req), this.requestContextExtractor.extractRequestOrigin(req));
+    const loggedUser = this.requestContextExtractor.extractLoggedUser(req);
+    const requestOrigin = this.requestContextExtractor.extractRequestOrigin(req);
+    await this.authService.logoutUser(loggedUser, requestOrigin);
     this.sessionCookie.clearSessionToken(res);
-    res.status(204).send();
+    sendSuccessMessage(res, HttpStatus.OK, AUTH_SUCCESS_MESSAGES.LOGGED_OUT);
   };
 }

@@ -1,9 +1,14 @@
 import { delay, http, HttpResponse } from 'msw';
-import type { ImportLeadsRequest } from '@/types/lead';
+import { env } from '@/config/env';
 import {
-  calculateLeadBaseIndicators,
+  countCompleteProfiles,
+  countInvalidOrRejectedContacts,
+  countNewLeadsInLastSevenDays,
+  countTotalLeads,
+  countUnassignedLeads,
   findLeadById,
-  importLeads,
+  findLeadImportProgress,
+  importLeadSpreadsheet,
   listFilterOptions,
   listLeads,
 } from './fakeLeadDatabase';
@@ -19,9 +24,29 @@ function readPositiveInteger(rawValue: string | null, fallback: number, maximum 
 }
 
 export const leadsApiHandlers = [
-  http.get('/api/leads/indicators', async () => {
+  http.get('/api/leads/indicators/total-leads', async () => {
     await delay(SIMULATED_NETWORK_DELAY_MS);
-    return HttpResponse.json(calculateLeadBaseIndicators());
+    return HttpResponse.json(countTotalLeads());
+  }),
+
+  http.get('/api/leads/indicators/new-leads', async () => {
+    await delay(SIMULATED_NETWORK_DELAY_MS);
+    return HttpResponse.json(countNewLeadsInLastSevenDays());
+  }),
+
+  http.get('/api/leads/indicators/unassigned-leads', async () => {
+    await delay(SIMULATED_NETWORK_DELAY_MS);
+    return HttpResponse.json(countUnassignedLeads());
+  }),
+
+  http.get('/api/leads/indicators/invalid-or-rejected-contacts', async () => {
+    await delay(SIMULATED_NETWORK_DELAY_MS);
+    return HttpResponse.json(countInvalidOrRejectedContacts());
+  }),
+
+  http.get('/api/leads/indicators/complete-profiles', async () => {
+    await delay(SIMULATED_NETWORK_DELAY_MS);
+    return HttpResponse.json(countCompleteProfiles());
   }),
 
   http.get('/api/leads/filter-options', async () => {
@@ -29,12 +54,21 @@ export const leadsApiHandlers = [
     return HttpResponse.json(listFilterOptions());
   }),
 
-  http.post('/api/leads/import', async ({ request }) => {
+  http.post('/api/leads/imports', async ({ request }) => {
     await delay(SIMULATED_NETWORK_DELAY_MS * 2);
-    const importLeadsRequest = (await request.json()) as ImportLeadsRequest;
-    const importResult = importLeads(importLeadsRequest);
-    if (!importResult) return HttpResponse.json({ error: 'Funil ou etapa inválidos' }, { status: 400 });
-    return HttpResponse.json(importResult, { status: 201 });
+    const importReading = importLeadSpreadsheet(await request.text(), env.leadImportMaximumRows);
+    if (importReading.status === 'unreadable') return HttpResponse.json({ error: importReading.reason }, { status: 400 });
+    if (importReading.content.rowsToImport.length === 0) {
+      return HttpResponse.json({ error: 'Nenhuma linha da planilha pode ser importada' }, { status: 400 });
+    }
+    return HttpResponse.json({ message: 'Importação recebida', importId: importReading.importId }, { status: 202 });
+  }),
+
+  http.get('/api/leads/imports/:importId', async ({ params }) => {
+    await delay(SIMULATED_NETWORK_DELAY_MS);
+    const leadImportProgress = findLeadImportProgress(String(params.importId));
+    if (!leadImportProgress) return HttpResponse.json({ error: 'Importação não encontrada' }, { status: 404 });
+    return HttpResponse.json(leadImportProgress);
   }),
 
   http.get('/api/leads/:leadId', async ({ params }) => {

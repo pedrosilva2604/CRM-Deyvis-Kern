@@ -1,5 +1,6 @@
 import { UnauthorizedError } from '@/errors/app-errors';
-import type { Clock } from '@/lib/clock';
+import type { Clock } from '@/infra/clock';
+import type { ISessionTerminationNotifier } from '@/infra/session-termination';
 import { AUTH_ERRORS } from '@/errors/errors.constants';
 import type { AuthUser } from '@/models/auth.model';
 import type { RequestOrigin } from '@/models/common.model';
@@ -22,6 +23,7 @@ export class SessionService implements ISessionService {
     private readonly tokens: ITokenService,
     private readonly clock: Clock,
     private readonly ttlHours: number,
+    private readonly sessionTerminationNotifier: ISessionTerminationNotifier,
   ) {}
 
   async startSession(userId: string, requestOrigin: RequestOrigin): Promise<IssuedSession> {
@@ -40,10 +42,12 @@ export class SessionService implements ISessionService {
 
   async endSession(sessionId: string): Promise<void> {
     await this.sessions.revokeSession(sessionId);
+    this.sessionTerminationNotifier.notifySessionEnded(sessionId);
   }
 
   async endAllUserSessions(userId: string): Promise<void> {
     await this.sessions.revokeAllUserSessions(userId);
+    this.sessionTerminationNotifier.notifyAllUserSessionsEnded(userId);
   }
 
   private calculateSessionExpiration() {

@@ -1,4 +1,4 @@
-import type { Mailer } from '@/lib/mailer';
+import type { Mailer } from '@/infra/mailer';
 
 export interface Recipient {
   name: string;
