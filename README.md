@@ -121,6 +121,28 @@ Exemplos: `feat(backend): adiciona troca de senha pelo admin`, `fix(frontend): c
 - Antes de cada commit rodam `npm run typecheck` e `npm run test:unit`; se houver erro de tipos ou um teste falhar, o commit é bloqueado.
 - Commits com `Co-authored-by` são recusados.
 
+## Branches e pull requests
+
+A `main` só muda pelo merge de um pull request. Cada tarefa nasce numa branch no formato `tipo/descricao`, com os mesmos tipos da tabela acima (ex.: `feat/funil-kanban`, `fix/busca-de-leads`), em letras minúsculas, números e hífens.
+
+```
+git switch -c feat/minha-tarefa
+git commit ...
+git push -u origin feat/minha-tarefa
+gh pr create
+```
+
+As regras são verificadas em duas camadas:
+
+| Onde | O que recusa |
+| --- | --- |
+| Husky `pre-commit` | Commit direto na `main` e branch fora do padrão `tipo/descricao` |
+| Husky `pre-merge-commit` | Merge feito localmente para dentro da `main` |
+| Husky `pre-push` | Envio direto para a `main` e branch fora do padrão |
+| GitHub (regra da `main`) | Qualquer mudança na `main` sem pull request, envio forçado e exclusão da `main`, sem exceção nem para administradores |
+
+Os hooks avisam cedo, na própria máquina; a regra do GitHub é a garantia final, porque vale mesmo quando alguém pula os hooks com `--no-verify`. Depois do merge do PR, atualize a `main` local com `git switch main` e `git pull --ff-only`.
+
 ## Licença
 
 Código disponível publicamente apenas para visualização. Todos os direitos reservados: não é permitido copiar, usar, modificar ou distribuir sem autorização. Veja [LICENSE](LICENSE).

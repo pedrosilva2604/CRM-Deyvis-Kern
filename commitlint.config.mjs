@@ -1,5 +1,7 @@
 const COAUTHOR_PATTERN = /^\s*co-authored-by\s*:/im;
 
+export const COMMIT_TYPES = ['feat', 'fix', 'chore', 'refactor', 'docs', 'perf', 'style', 'test', 'build', 'ci', 'env'];
+
 export default {
   extends: ['@commitlint/config-conventional'],
   plugins: [
@@ -13,11 +15,7 @@ export default {
     },
   ],
   rules: {
-    'type-enum': [
-      2,
-      'always',
-      ['feat', 'fix', 'chore', 'refactor', 'docs', 'perf', 'style', 'test', 'build', 'ci', 'env'],
-    ],
+    'type-enum': [2, 'always', COMMIT_TYPES],
     'subject-full-stop': [2, 'never', '.'],
     'no-coauthor': [2, 'always'],
   },
