@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { endBrowserSession } from '@/lib/browserSession';
 import { useAuth } from '@/stores/auth';
 
 const SESSION_EXPIRED_NOTICE = 'Sua sessão expirou. Entre novamente.';
@@ -9,7 +10,7 @@ api.interceptors.response.use(
   (res) => res,
   (err) => {
     if (axios.isAxiosError(err) && err.response?.status === 401 && useAuth.getState().status === 'authenticated') {
-      useAuth.getState().clearSession(SESSION_EXPIRED_NOTICE);
+      endBrowserSession(SESSION_EXPIRED_NOTICE);
     }
     return Promise.reject(err);
   },

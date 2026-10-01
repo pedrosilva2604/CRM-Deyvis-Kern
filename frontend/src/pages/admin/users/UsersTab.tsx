@@ -8,6 +8,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { IconButton } from '@/components/ui/IconButton';
 import { useActivateUser, useDeactivateUser, useDeleteUser, useUsers } from '@/hooks/useUsers';
 import { apiErrorMessage } from '@/lib/api';
+import { endBrowserSession } from '@/lib/browserSession';
 import { useAuth } from '@/stores/auth';
 import { ROLE_LABELS, type ManagedUser } from '@/types/user';
 import { UserFormDialog } from './UserFormDialog';
@@ -38,7 +39,6 @@ function matchesSearch(user: ManagedUser, term: string) {
 
 export function UsersTab() {
   const currentUserEmail = useAuth((state) => state.user?.email);
-  const clearSession = useAuth((state) => state.clearSession);
   const { data: users = [], isPending, isError, refetch, isRefetching } = useUsers();
   const activateUser = useActivateUser();
   const deactivateUser = useDeactivateUser();
@@ -74,7 +74,7 @@ export function UsersTab() {
   }
 
   function handlePasswordSaved(user: ManagedUser, message: string) {
-    if (isSelf(user)) return clearSession('Sua senha foi alterada. Entre novamente com a nova senha.');
+    if (isSelf(user)) return endBrowserSession('Sua senha foi alterada. Entre novamente com a nova senha.');
     completeWith(message);
   }
 
