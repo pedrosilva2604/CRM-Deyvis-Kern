@@ -105,6 +105,7 @@ export interface LeadImportProgress {
   invalidRows: number;
   duplicateRowsInFile: number;
   rowsToImport: number;
+  processedRows: number;
   importedLeads: number;
   skippedExistingLeads: number;
   createdAt: string;

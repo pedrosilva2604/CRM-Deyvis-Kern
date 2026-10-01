@@ -15,8 +15,17 @@ import { LeadsTable } from './LeadsTable';
 import { useLeadsPageUrlState } from './useLeadsPageUrlState';
 
 export function LeadsPage() {
-  const { filters, hasActiveFilters, updateFilters, clearFilters, selectedLeadId, openLeadDetails, closeLeadDetails } =
-    useLeadsPageUrlState();
+  const {
+    filters,
+    hasActiveFilters,
+    updateFilters,
+    clearFilters,
+    selectedLeadId,
+    openLeadDetails,
+    closeLeadDetails,
+    trackedImportId,
+    stopTrackingImport,
+  } = useLeadsPageUrlState();
   const { data: leadListPage, isPending, isError, isPlaceholderData, refetch } = useLeadList(filters);
   const { data: filterOptions } = useLeadFilterOptions();
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
@@ -114,6 +123,9 @@ export function LeadsPage() {
 
       {selectedLeadId && <LeadDetailsDrawer leadId={selectedLeadId} onClose={closeLeadDetails} />}
       {isImportDialogOpen && <ImportLeadsDialog onClose={() => setIsImportDialogOpen(false)} />}
+      {trackedImportId && !isImportDialogOpen && (
+        <ImportLeadsDialog importIdToTrack={trackedImportId} onClose={stopTrackingImport} />
+      )}
     </>
   );
 }

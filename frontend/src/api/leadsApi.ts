@@ -78,4 +78,8 @@ export const leadsApi = {
     const response = await api.get<LeadImportProgress>(`/leads/imports/${importId}`);
     return response.data;
   },
+
+  async retryLeadImport(importId: string): Promise<void> {
+    await api.post(`/leads/imports/${importId}/retry`);
+  },
 };

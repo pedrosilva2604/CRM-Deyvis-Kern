@@ -78,6 +78,14 @@ export function useRequestLeadImport() {
   });
 }
 
+export function useRetryLeadImport(importId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => leadsApi.retryLeadImport(importId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: [...LEADS_QUERY_KEY, 'imports', importId] }),
+  });
+}
+
 function isLeadImportRunning(leadImportProgress: LeadImportProgress | undefined) {
   return leadImportProgress === undefined || RUNNING_LEAD_IMPORT_STATUSES.includes(leadImportProgress.status);
 }
