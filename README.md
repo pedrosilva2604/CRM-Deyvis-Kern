@@ -51,8 +51,6 @@ Todos os ids do banco são UUID nativo do PostgreSQL.
 
 Toda rota pode responder `429` (limite de tentativas) e `500` (falha inesperada do servidor); as que consultam o banco podem responder `503` (banco indisponível); e as que exigem sessão respondem `401` sem uma sessão válida.
 
-A lista de rotas, com entradas, saídas e respostas de cada uma, vai ficar numa documentação OpenAPI (Swagger) gerada a partir dos schemas Zod e disponível só no ambiente de desenvolvimento.
-
 ## Rodando localmente
 
 1. Copie os arquivos de exemplo e preencha os valores (gere segredos longos e aleatórios):
@@ -76,8 +74,6 @@ A lista de rotas, com entradas, saídas e respostas de cada uma, vai ficar numa 
 | `npm run test` | Todos os testes (Vitest) |
 | `npm run db:migrate` / `db:seed` / `db:studio` | Prisma |
 
-Como os testes são organizados e escritos: [docs/TESTES.md](docs/TESTES.md).
-
 ## Deploy (produção)
 
 Cada parte roda como um serviço separado, com a sua própria imagem:
@@ -88,8 +84,6 @@ Cada parte roda como um serviço separado, com a sua própria imagem:
 | `api` | [`backend/Dockerfile`](backend/Dockerfile) (alvo `runtime`) | API Node, usuário sem privilégios, healthcheck e desligamento seguro ao receber SIGTERM |
 | `migrate` | [`backend/Dockerfile`](backend/Dockerfile) (alvo `migrator`) | Roda `prisma migrate deploy` uma vez antes da API subir |
 | `postgres`, `redis`, `evolution` | Imagens oficiais com versão fixa | Banco, Redis com senha e WhatsApp (Evolution) |
-
-A explicação de cada linha dos Dockerfiles, do nginx e do compose está em [docs/DOCKER.md](docs/DOCKER.md).
 
 [`docker-compose.prod.yml`](docker-compose.prod.yml) junta todos os serviços como referência. Só o `web` expõe porta; API, banco e Redis ficam em redes internas.
 
