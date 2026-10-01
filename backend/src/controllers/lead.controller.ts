@@ -47,4 +47,10 @@ export class LeadController {
     await this.leadService.deleteLead({ targetLeadId: req.params.leadId }, loggedUserContext);
     sendSuccessMessage(res, HttpStatus.OK, LEAD_SUCCESS_MESSAGES.DELETED);
   };
+
+  restoreLead = async (req: Request<LeadIdParams>, res: Response) => {
+    const loggedUserContext = this.requestContextExtractor.extractLoggedUserContext(req);
+    await this.leadService.restoreLead({ targetLeadId: req.params.leadId }, loggedUserContext);
+    sendSuccessMessage(res, HttpStatus.OK, LEAD_SUCCESS_MESSAGES.RESTORED);
+  };
 }

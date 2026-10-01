@@ -22,7 +22,7 @@ export const HttpStatus = {
 export type HttpStatusCode = (typeof HttpStatus)[keyof typeof HttpStatus];
 
 export function sendErrorResponse(res: Response, httpStatus: HttpStatusCode, error: AppError) {
-  res.status(httpStatus).json({ error: error.message });
+  res.status(httpStatus).json({ error: error.message, ...error.extraResponseFields });
 }
 
 export function sendSuccessMessage(res: Response, httpStatus: HttpStatusCode, message: string) {

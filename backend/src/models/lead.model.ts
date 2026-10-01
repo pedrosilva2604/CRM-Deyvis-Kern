@@ -139,7 +139,21 @@ export type UpdateLeadData = Partial<Omit<CreateLeadData, 'pipelineId'>> & {
   contactStatus?: LeadContactStatus;
 };
 
-export const notDeletedLeads = { deletedAt: null } satisfies Prisma.LeadWhereInput;
+export interface LeadContact {
+  phone?: string;
+  email?: string | null;
+}
+
+export interface DeletedLeadHoldingContact {
+  leadId: string;
+  heldContact: 'phone' | 'email';
+}
+
+export interface RestoreLeadRequest {
+  targetLeadId: string;
+}
+
+export const notDeletedLeads ={ deletedAt: null } satisfies Prisma.LeadWhereInput;
 
 export const leadOutputRelations = {
   pipeline: { select: { id: true, name: true } },

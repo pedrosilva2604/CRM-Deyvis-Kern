@@ -17,6 +17,11 @@ export const LEAD_ERRORS = {
   EMAIL_IN_USE: 'Já existe um lead com este e-mail',
   STAGE_NOT_FOUND: 'Etapa do funil não encontrada',
   ASSIGNEE_NOT_AVAILABLE: 'Responsável não encontrado ou desativado',
+  PHONE_HELD_BY_DELETED_LEAD: 'Este telefone pertence a um lead excluído. Você pode restaurá-lo.',
+  EMAIL_HELD_BY_DELETED_LEAD: 'Este e-mail pertence a um lead excluído. Você pode restaurá-lo.',
+  PHONE_IN_USE_ASK_ADMIN: 'Este telefone já está em uso. Fale com um administrador.',
+  EMAIL_IN_USE_ASK_ADMIN: 'Este e-mail já está em uso. Fale com um administrador.',
+  DELETED_LEAD_NOT_FOUND: 'Lead excluído não encontrado',
 } as const;
 
 export const LEAD_IMPORT_ERRORS = {

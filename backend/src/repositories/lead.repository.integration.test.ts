@@ -84,6 +84,45 @@ describe('Busca de leads por telefone', () => {
   });
 });
 
+describe('Lead excluído que ainda segura o telefone ou o e-mail', () => {
+  it('encontra o lead excluído que tem o telefone', async () => {
+    const deletedLead = await database.addLead({ name: 'Excluído', phone: '+5511900000001', deleted: true });
+
+    expect(await leads.findDeletedLeadHoldingContact({ phone: '+5511900000001' })).toEqual({
+      leadId: deletedLead,
+      heldContact: 'phone',
+    });
+  });
+
+  it('encontra o lead excluído que tem o e-mail', async () => {
+    const deletedLead = await database.addLead({ name: 'Excluído', phone: '+5511900000001', email: 'ana@empresa.com', deleted: true });
+
+    expect(await leads.findDeletedLeadHoldingContact({ phone: '+5511900000099', email: 'ana@empresa.com' })).toEqual({
+      leadId: deletedLead,
+      heldContact: 'email',
+    });
+  });
+
+  it('não aponta lead ativo, porque esse caso já é o "telefone em uso" de sempre', async () => {
+    await database.addLead({ name: 'Ativo', phone: '+5511900000001' });
+
+    expect(await leads.findDeletedLeadHoldingContact({ phone: '+5511900000001' })).toBeNull();
+  });
+
+  it('restaura o lead excluído com o histórico dele', async () => {
+    const deletedLead = await database.addLead({ name: 'Excluído', phone: '+5511900000001', deleted: true });
+
+    expect(await leads.restoreDeletedLead(deletedLead)).toBe(true);
+    expect(await leads.findLeadById(deletedLead)).toMatchObject({ name: 'Excluído', phone: '+5511900000001' });
+  });
+
+  it('não "restaura" um lead que não está excluído', async () => {
+    const activeLead = await database.addLead({ name: 'Ativo', phone: '+5511900000001' });
+
+    expect(await leads.restoreDeletedLead(activeLead)).toBe(false);
+  });
+});
+
 describe('Paginação da lista de leads', () => {
   it('informa o total encontrado mesmo mostrando só uma página', async () => {
     await database.addLead({ name: 'Lead 1', phone: '+5511900000001' });

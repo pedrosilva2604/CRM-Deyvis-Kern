@@ -2,6 +2,7 @@ export const LEAD_SUCCESS_MESSAGES = {
   CREATED: 'Lead criado',
   UPDATED: 'Lead atualizado',
   DELETED: 'Lead excluído',
+  RESTORED: 'Lead restaurado',
 } as const;
 
 export const LEAD_IMPORT_SUCCESS_MESSAGES = {
