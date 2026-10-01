@@ -108,6 +108,8 @@ export interface LeadImportProgress {
   processedRows: number;
   importedLeads: number;
   skippedExistingLeads: number;
+  restoredLeads: number;
+  skippedDeletedLeads: number;
   createdAt: string;
   finishedAt: string | null;
 }

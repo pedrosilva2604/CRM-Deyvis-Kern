@@ -24,10 +24,14 @@ function RunningImport({ description }: { description: string }) {
   );
 }
 
-function describeCompletedImport({ importedLeads, skippedExistingLeads }: LeadImportProgress) {
-  const importedDescription = `${formatInteger(importedLeads)} leads importados.`;
-  if (skippedExistingLeads === 0) return importedDescription;
-  return `${importedDescription} ${formatInteger(skippedExistingLeads)} já existiam no CRM e foram ignorados.`;
+function describeCompletedImport({ importedLeads, skippedExistingLeads, restoredLeads, skippedDeletedLeads }: LeadImportProgress) {
+  const sentences = [`${formatInteger(importedLeads)} leads importados.`];
+  if (restoredLeads > 0) sentences.push(`${formatInteger(restoredLeads)} que estavam excluídos foram restaurados.`);
+  if (skippedExistingLeads > 0) sentences.push(`${formatInteger(skippedExistingLeads)} já existiam no CRM e foram ignorados.`);
+  if (skippedDeletedLeads > 0) {
+    sentences.push(`${formatInteger(skippedDeletedLeads)} pertencem a leads excluídos: peça a um administrador para restaurá-los.`);
+  }
+  return sentences.join(' ');
 }
 
 function InterruptedImport({ importId, progress }: { importId: string; progress: LeadImportProgress }) {
