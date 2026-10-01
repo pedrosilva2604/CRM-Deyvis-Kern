@@ -6,6 +6,7 @@ import type {
   CreateLeadImportData,
   FinishedLeadImport,
   LeadImportChunk,
+  LeadImportChunkResult,
   LeadImportProgress,
   LeadImportRowToProcess,
   LeadImportToProcess,
@@ -25,6 +26,9 @@ export interface StoredLeadImport {
   processedRows: number;
   importedLeads: number;
   skippedExistingLeads: number;
+  restoredLeads: number;
+  skippedDeletedLeads: number;
+  requesterIsAdmin: boolean;
   failureReason: string | null;
   createdAt: Date;
   startedAt: Date | null;
@@ -38,6 +42,7 @@ const RUNNING_STATUSES: LeadImportStatus[] = ['PENDING', 'PROCESSING'];
 
 export class InMemoryLeadImportRepository implements ILeadImportRepository {
   readonly phonesAlreadyInCrm = new Set<string>();
+  readonly phonesOfDeletedLeads = new Set<string>();
   readonly phonesOfEachReceivedChunk: string[][] = [];
   private readonly storedImports = new Map<string, StoredLeadImport>();
   private createdImports = 0;
@@ -56,6 +61,9 @@ export class InMemoryLeadImportRepository implements ILeadImportRepository {
       processedRows: 0,
       importedLeads: 0,
       skippedExistingLeads: 0,
+      restoredLeads: 0,
+      skippedDeletedLeads: 0,
+      requesterIsAdmin: false,
       failureReason: null,
       createdAt: new Date(),
       startedAt: null,
@@ -93,6 +101,8 @@ export class InMemoryLeadImportRepository implements ILeadImportRepository {
       processedRows: storedImport.processedRows,
       importedLeads: storedImport.importedLeads,
       skippedExistingLeads: storedImport.skippedExistingLeads,
+      restoredLeads: storedImport.restoredLeads,
+      skippedDeletedLeads: storedImport.skippedDeletedLeads,
       createdAt: storedImport.createdAt,
       finishedAt: storedImport.finishedAt,
     };
@@ -112,12 +122,15 @@ export class InMemoryLeadImportRepository implements ILeadImportRepository {
     return {
       importId: storedImport.importId,
       requestedById: storedImport.requestedById,
+      restoresDeletedLeads: storedImport.requesterIsAdmin,
       pipelineId: storedImport.pipelineId,
       stageId: storedImport.stageId,
       rowsToImport: storedImport.rowsToImport,
       processedRows: storedImport.processedRows,
       importedLeads: storedImport.importedLeads,
       skippedExistingLeads: storedImport.skippedExistingLeads,
+      restoredLeads: storedImport.restoredLeads,
+      skippedDeletedLeads: storedImport.skippedDeletedLeads,
     };
   }
 
@@ -125,20 +138,25 @@ export class InMemoryLeadImportRepository implements ILeadImportRepository {
     return this.find(importId).rows.slice(alreadyProcessedRows, alreadyProcessedRows + chunkSize);
   }
 
-  async importChunk({ importId, processedRowsBefore, leadsToCreate }: LeadImportChunk): Promise<number> {
+  async importChunk({ importId, processedRowsBefore, restoresDeletedLeads, leadsToCreate }: LeadImportChunk): Promise<LeadImportChunkResult> {
     const storedImport = this.find(importId);
     if (storedImport.status !== 'PROCESSING' || storedImport.processedRows !== processedRowsBefore) {
       throw new LeadImportChunkAlreadyProcessedError(importId);
     }
     this.phonesOfEachReceivedChunk.push(leadsToCreate.map((lead) => lead.phone));
-    const newLeads = leadsToCreate.filter((lead) => !this.phonesAlreadyInCrm.has(lead.phone));
+    const phonesOfDeletedLeadsInChunk = leadsToCreate.map((lead) => lead.phone).filter((phone) => this.phonesOfDeletedLeads.has(phone));
+    const restoredLeads = restoresDeletedLeads ? phonesOfDeletedLeadsInChunk.length : 0;
+    const skippedDeletedLeads = restoresDeletedLeads ? 0 : phonesOfDeletedLeadsInChunk.length;
+    if (restoresDeletedLeads) phonesOfDeletedLeadsInChunk.forEach((phone) => this.restoreDeletedLead(phone));
+    const newLeads = leadsToCreate.filter((lead) => !this.phonesAlreadyInCrm.has(lead.phone) && !this.phonesOfDeletedLeads.has(lead.phone));
     newLeads.forEach((lead) => this.phonesAlreadyInCrm.add(lead.phone));
     storedImport.processedRows += leadsToCreate.length;
     storedImport.importedLeads += newLeads.length;
-    storedImport.skippedExistingLeads += leadsToCreate.length - newLeads.length;
-    return newLeads.length;
+    storedImport.restoredLeads += restoredLeads;
+    storedImport.skippedDeletedLeads += skippedDeletedLeads;
+    storedImport.skippedExistingLeads += leadsToCreate.length - newLeads.length - restoredLeads - skippedDeletedLeads;
+    return { insertedLeads: newLeads.length, restoredLeads, skippedDeletedLeads };
   }
-
   async completeLeadImport(importId: string, finishedAt: Date): Promise<FinishedLeadImport | null> {
     const storedImport = this.find(importId);
     if (storedImport.status !== 'PROCESSING') return null;
@@ -206,6 +224,11 @@ export class InMemoryLeadImportRepository implements ILeadImportRepository {
     return this.describeFinishedImport(storedImport);
   }
 
+  private restoreDeletedLead(phone: string): void {
+    this.phonesOfDeletedLeads.delete(phone);
+    this.phonesAlreadyInCrm.add(phone);
+  }
+
   private findImportIds(matches: (storedImport: StoredLeadImport) => boolean): string[] {
     return [...this.storedImports.values()].filter(matches).map((storedImport) => storedImport.importId);
   }
@@ -216,6 +239,8 @@ export class InMemoryLeadImportRepository implements ILeadImportRepository {
       requestedById: storedImport.requestedById,
       importedLeads: storedImport.importedLeads,
       skippedExistingLeads: storedImport.skippedExistingLeads,
+      restoredLeads: storedImport.restoredLeads,
+      skippedDeletedLeads: storedImport.skippedDeletedLeads,
       finishedAt: storedImport.finishedAt ?? new Date(),
     };
   }

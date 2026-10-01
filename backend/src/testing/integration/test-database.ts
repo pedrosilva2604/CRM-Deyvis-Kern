@@ -146,6 +146,10 @@ export class TestDatabase {
     return await this.client.leadImportRow.count({ where: { leadImportId: importId } });
   }
 
+  async findLeadByPhone(phone: string) {
+    return await this.client.lead.findUniqueOrThrow({ where: { phone } });
+  }
+
   async findPhonesOfAllLeads(): Promise<string[]> {
     const leads = await this.client.lead.findMany({ select: { phone: true }, orderBy: { phone: 'asc' } });
     return leads.map(({ phone }) => phone);

@@ -1,4 +1,4 @@
-import type { LeadImport, LeadImportStatus } from '@prisma/client';
+import type { LeadImport, LeadImportStatus, Role } from '@prisma/client';
 
 export type LeadImportIdParams = {
   importId: string;
@@ -44,19 +44,18 @@ export interface LeadImportProgress {
   processedRows: number;
   importedLeads: number;
   skippedExistingLeads: number;
+  restoredLeads: number;
+  skippedDeletedLeads: number;
   createdAt: Date;
   finishedAt: Date | null;
 }
 
-export interface LeadImportToProcess {
+export interface LeadImportToProcess extends LeadImportCounters {
   importId: string;
   requestedById: string | null;
+  restoresDeletedLeads: boolean;
   pipelineId: string;
   stageId: string;
-  rowsToImport: number;
-  processedRows: number;
-  importedLeads: number;
-  skippedExistingLeads: number;
 }
 
 export interface LeadImportRowToProcess {
@@ -70,7 +69,14 @@ export interface LeadImportRowToProcess {
 export interface LeadImportChunk {
   importId: string;
   processedRowsBefore: number;
+  restoresDeletedLeads: boolean;
   leadsToCreate: Array<LeadImportRowToProcess & { pipelineId: string; stageId: string }>;
+}
+
+export interface LeadImportChunkResult {
+  insertedLeads: number;
+  restoredLeads: number;
+  skippedDeletedLeads: number;
 }
 
 export interface LeadImportCounters {
@@ -78,6 +84,8 @@ export interface LeadImportCounters {
   processedRows: number;
   importedLeads: number;
   skippedExistingLeads: number;
+  restoredLeads: number;
+  skippedDeletedLeads: number;
 }
 
 export interface FinishedLeadImport {
@@ -85,6 +93,8 @@ export interface FinishedLeadImport {
   requestedById: string | null;
   importedLeads: number;
   skippedExistingLeads: number;
+  restoredLeads: number;
+  skippedDeletedLeads: number;
   finishedAt: Date;
 }
 
@@ -94,6 +104,8 @@ export function toFinishedLeadImport(leadImport: LeadImport, finishedAt: Date): 
     requestedById: leadImport.requestedById,
     importedLeads: leadImport.importedLeads,
     skippedExistingLeads: leadImport.skippedExistingLeads,
+    restoredLeads: leadImport.restoredLeads,
+    skippedDeletedLeads: leadImport.skippedDeletedLeads,
     finishedAt: leadImport.finishedAt ?? finishedAt,
   };
 }
@@ -108,20 +120,25 @@ export function toLeadImportProgress(leadImport: LeadImport): LeadImportProgress
     processedRows: leadImport.processedRows,
     importedLeads: leadImport.importedLeads,
     skippedExistingLeads: leadImport.skippedExistingLeads,
+    restoredLeads: leadImport.restoredLeads,
+    skippedDeletedLeads: leadImport.skippedDeletedLeads,
     createdAt: leadImport.createdAt,
     finishedAt: leadImport.finishedAt,
   };
 }
 
-export function toLeadImportToProcess(leadImport: LeadImport): LeadImportToProcess {
+export function toLeadImportToProcess(leadImport: LeadImport, requesterRole: Role | null): LeadImportToProcess {
   return {
     importId: leadImport.id,
     requestedById: leadImport.requestedById,
+    restoresDeletedLeads: requesterRole === 'ADMIN',
     pipelineId: leadImport.pipelineId,
     stageId: leadImport.stageId,
     rowsToImport: leadImport.rowsToImport,
     processedRows: leadImport.processedRows,
     importedLeads: leadImport.importedLeads,
     skippedExistingLeads: leadImport.skippedExistingLeads,
+    restoredLeads: leadImport.restoredLeads,
+    skippedDeletedLeads: leadImport.skippedDeletedLeads,
   };
 }

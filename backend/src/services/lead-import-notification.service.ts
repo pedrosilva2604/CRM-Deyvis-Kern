@@ -29,7 +29,7 @@ export class LeadImportNotificationService implements ILeadImportNotificationSer
 
   async notifyImportCompleted(finishedImport: FinishedLeadImport): Promise<void> {
     const { title, message } = LEAD_IMPORT_NOTIFICATION_MESSAGES.COMPLETED;
-    await this.notifyRequester(finishedImport, NotificationType.LEAD_IMPORT_COMPLETED, title, message(finishedImport.importedLeads, finishedImport.skippedExistingLeads));
+    await this.notifyRequester(finishedImport, NotificationType.LEAD_IMPORT_COMPLETED, title, message(finishedImport));
   }
 
   async notifyImportFailed(finishedImport: FinishedLeadImport): Promise<void> {

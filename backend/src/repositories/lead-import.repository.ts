@@ -6,6 +6,7 @@ import {
   type CreateLeadImportData,
   type FinishedLeadImport,
   type LeadImportChunk,
+  type LeadImportChunkResult,
   type LeadImportProgress,
   type LeadImportRowToProcess,
   type LeadImportToProcess,
@@ -18,7 +19,7 @@ export interface ILeadImportRepository {
   hasRunningLeadImport(requestedById: string): Promise<boolean>;
   startLeadImport(importId: string, startedAt: Date): Promise<LeadImportToProcess | null>;
   findNextRowsToProcess(importId: string, alreadyProcessedRows: number, chunkSize: number): Promise<LeadImportRowToProcess[]>;
-  importChunk(chunk: LeadImportChunk): Promise<number>;
+  importChunk(chunk: LeadImportChunk): Promise<LeadImportChunkResult>;
   completeLeadImport(importId: string, finishedAt: Date): Promise<FinishedLeadImport | null>;
   failLeadImport(importId: string, failureReason: string, finishedAt: Date): Promise<FinishedLeadImport | null>;
   reopenFailedLeadImport(importId: string): Promise<boolean>;
@@ -73,8 +74,11 @@ export class LeadImportRepository implements ILeadImportRepository {
     });
     if (markedAsProcessing.count === 0) return null;
     await this.prisma.leadImport.updateMany({ where: { id: importId, startedAt: null }, data: { startedAt } });
-    const leadImport = await this.prisma.leadImport.findUnique({ where: { id: importId } });
-    return leadImport ? toLeadImportToProcess(leadImport) : null;
+    const leadImport = await this.prisma.leadImport.findUnique({
+      where: { id: importId },
+      include: { requestedBy: { select: { role: true } } },
+    });
+    return leadImport ? toLeadImportToProcess(leadImport, leadImport.requestedBy?.role ?? null) : null;
   }
 
   async findNextRowsToProcess(
@@ -91,19 +95,28 @@ export class LeadImportRepository implements ILeadImportRepository {
     });
   }
 
-  async importChunk({ importId, processedRowsBefore, leadsToCreate }: LeadImportChunk): Promise<number> {
+  async importChunk({ importId, processedRowsBefore, restoresDeletedLeads, leadsToCreate }: LeadImportChunk): Promise<LeadImportChunkResult> {
     return await this.prisma.$transaction(async (transaction) => {
+      const deletedLeadsOfChunk = { phone: { in: leadsToCreate.map((lead) => lead.phone) }, deletedAt: { not: null } };
+      const restoredLeads = restoresDeletedLeads
+        ? (await transaction.lead.updateMany({ where: deletedLeadsOfChunk, data: { deletedAt: null } })).count
+        : 0;
+      const skippedDeletedLeads = restoresDeletedLeads ? 0 : await transaction.lead.count({ where: deletedLeadsOfChunk });
       const insertion = await transaction.lead.createMany({ data: leadsToCreate, skipDuplicates: true });
+      const skippedExistingLeads = leadsToCreate.length - insertion.count - restoredLeads - skippedDeletedLeads;
+
       const advanced = await transaction.leadImport.updateMany({
         where: { id: importId, status: LeadImportStatus.PROCESSING, processedRows: processedRowsBefore },
         data: {
           processedRows: processedRowsBefore + leadsToCreate.length,
           importedLeads: { increment: insertion.count },
-          skippedExistingLeads: { increment: leadsToCreate.length - insertion.count },
+          skippedExistingLeads: { increment: skippedExistingLeads },
+          restoredLeads: { increment: restoredLeads },
+          skippedDeletedLeads: { increment: skippedDeletedLeads },
         },
       });
       if (advanced.count === 0) throw new LeadImportChunkAlreadyProcessedError(importId);
-      return insertion.count;
+      return { insertedLeads: insertion.count, restoredLeads, skippedDeletedLeads };
     });
   }
 

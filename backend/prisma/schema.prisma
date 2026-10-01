@@ -203,6 +203,8 @@ model LeadImport {
   rowsToImport         Int
   importedLeads        Int              @default(0)
   skippedExistingLeads Int              @default(0)
+  restoredLeads        Int              @default(0)
+  skippedDeletedLeads  Int              @default(0)
   processedRows        Int              @default(0)
   pipelineId           String           @db.Uuid
   pipeline             Pipeline         @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
