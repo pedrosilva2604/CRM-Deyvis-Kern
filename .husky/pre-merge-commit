@@ -1,0 +1,1 @@
+node scripts/git/check-current-branch.mjs merge

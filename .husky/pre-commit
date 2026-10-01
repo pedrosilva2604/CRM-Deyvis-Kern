@@ -1,2 +1,3 @@
+node scripts/git/check-current-branch.mjs commit
 npm run typecheck
 npm run test:unit
