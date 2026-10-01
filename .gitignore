@@ -26,3 +26,5 @@ Thumbs.db
 *.p12
 *.pfx
 id_rsa*
+
+docs/
