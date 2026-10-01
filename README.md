@@ -49,40 +49,9 @@ Todos os ids do banco são UUID nativo do PostgreSQL.
 
 **Tratamento de erros:** controllers, services e repositories só lançam erros (`throw new NotFoundError(...)`); quem responde ao cliente é o `ErrorMiddleware`, no fim da cadeia do Express, usando o `statusCode` de cada classe de erro. Erros do banco são traduzidos num lugar só (`repositories/database-client.ts`): registro inexistente vira 404, telefone/e-mail duplicado vira 409 e banco fora do ar vira 503. Qualquer outra falha vira 500 com mensagem genérica, e o detalhe vai só para o log.
 
-Além das respostas listadas em cada rota, **todas** podem responder `429` (limite de tentativas) e `500` (falha inesperada do servidor); as que consultam o banco podem responder `503` (banco indisponível); e as que exigem sessão respondem `401` sem uma sessão válida.
+Toda rota pode responder `429` (limite de tentativas) e `500` (falha inesperada do servidor); as que consultam o banco podem responder `503` (banco indisponível); e as que exigem sessão respondem `401` sem uma sessão válida.
 
-| Rota | Acesso | O que faz | Respostas |
-| --- | --- | --- | --- |
-| `GET /api/health` | pública | Verifica se a API está no ar | 200 |
-| `POST /api/auth/login` | pública | Valida as credenciais e abre uma sessão (cookie) | 200, 400, 401 |
-| `POST /api/auth/forgot-password` | pública | Envia o link de redefinição por e-mail | 200, 400 |
-| `POST /api/auth/reset-password` | pública | Troca a senha e encerra todas as sessões do usuário | 200, 400 |
-| `GET /api/auth/logged-user` | sessão | Confirma se a sessão ainda vale e retorna o usuário logado | 200 |
-| `POST /api/auth/logout` | sessão | Encerra a sessão atual e apaga o cookie | 200 |
-| `PATCH /api/profile/theme` | sessão | Salva o tema (`LIGHT` ou `DARK`) do usuário logado | 200, 400 |
-| `GET /api/users` | ADMIN | Lista os usuários | 200, 403 |
-| `POST /api/users` | ADMIN | Cadastra um usuário | 201, 400, 403, 409 |
-| `PATCH /api/users/:id` | ADMIN | Edita nome, e-mail e/ou perfil de um usuário | 200, 400, 403, 404, 409 |
-| `PATCH /api/users/:id/activate` | ADMIN | Reativa um usuário desativado | 200, 400, 403, 404 |
-| `PATCH /api/users/:id/deactivate` | ADMIN | Desativa um usuário e encerra as sessões dele (não vale para si mesmo nem para o último admin ativo) | 200, 400, 403, 404 |
-| `PATCH /api/users/:id/password` | ADMIN | Define uma nova senha para o usuário e encerra as sessões dele | 200, 400, 403, 404 |
-| `DELETE /api/users/:id` | ADMIN | Exclui um usuário | 200, 400, 403, 404 |
-| `GET /api/leads` | sessão | Lista leads com busca, filtros (`stageId`, `source`, `assignment` = id ou `unassigned`, `contactStatus`) e paginação (`page`, `pageSize` até 100). A busca aceita um telefone completo em qualquer formato (comparação exata) ou palavras inteiras de nome/e-mail, sem diferenciar acentos | 200, 400 |
-| `GET /api/leads/indicators/total-leads` | sessão | `{ totalLeads }`: leads não excluídos | 200 |
-| `GET /api/leads/indicators/new-leads` | sessão | `{ newLeadsInLastSevenDays }`: pela data de entrada, no fuso `APP_TIME_ZONE` | 200 |
-| `GET /api/leads/indicators/unassigned-leads` | sessão | `{ unassignedLeads, shareOfBase }`: sem responsável e a fração da base (0 a 1) | 200 |
-| `GET /api/leads/indicators/invalid-or-rejected-contacts` | sessão | `{ invalidOrRejectedContacts, shareOfBase }`: contato inválido ou spam | 200 |
-| `GET /api/leads/indicators/complete-profiles` | sessão | `{ completeProfiles, shareOfBase }`: com nome, telefone e e-mail | 200 |
-| `GET /api/leads/filter-options` | sessão | Funis e etapas, origens em uso e usuários ativos que podem ser responsáveis | 200 |
-| `GET /api/leads/:leadId` | sessão | Detalhes de um lead | 200, 400, 404 |
-| `POST /api/leads` | sessão | Cria um lead. Telefone e e-mail são únicos no CRM inteiro (409 se já existirem, inclusive em lead excluído) | 201, 400, 409 |
-| `PATCH /api/leads/:leadId` | sessão | Edita um lead; só grava e audita os campos que realmente mudaram; trocar o telefone recalcula o país (`phoneCountry`) | 200, 400, 404, 409 |
-| `DELETE /api/leads/:leadId` | ADMIN | Exclusão lógica (`deletedAt`): some das telas, mas o histórico fica e o telefone/e-mail continuam bloqueados | 200, 400, 403, 404 |
-| `POST /api/leads/imports` | sessão | Recebe a planilha como `Content-Type: text/csv` (até `LEAD_IMPORT_MAX_FILE_BYTES` e `LEAD_IMPORT_MAX_ROWS` linhas), relê e revalida tudo no backend com as mesmas regras do `@crm/shared`, grava o pedido e as linhas válidas (sem duplicadas na planilha) e responde `{ message, importId }`. Os leads são criados depois, pela fila. Limite próprio de envios por usuário (`LEAD_IMPORT_RATE_LIMIT` por janela). Cada usuário tem no máximo **uma importação em andamento** (`PENDING` ou `PROCESSING`): o service recusa com 409 e um índice único parcial no banco garante a regra mesmo com envios simultâneos | 202, 400, 409, 413, 415, 429 |
-| `GET /api/leads/imports/:importId` | sessão | Andamento da importação: `status` (`PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`) e as contagens (linhas, inválidas, repetidas na planilha, a importar, importadas, já existentes). Cada usuário vê só as próprias importações; o ADMIN vê todas | 200, 400, 404 |
-| `GET /api/notifications` | sessão | As 30 notificações mais recentes do usuário logado e `unreadCount` (não lidas). Notificações novas também chegam em tempo real pelo Socket.IO (evento `notification:created`), e o progresso das importações pelo evento `lead-import:progress` | 200 |
-| `PATCH /api/notifications/:notificationId/read` | sessão | Marca uma notificação do próprio usuário como lida (de outra pessoa responde 404) | 200, 400, 404 |
-| `PATCH /api/notifications/read-all` | sessão | Marca todas as notificações do usuário como lidas. Notificações lidas há mais de `NOTIFICATION_READ_RETENTION_DAYS` dias são apagadas na manutenção diária | 200 |
+A lista de rotas, com entradas, saídas e respostas de cada uma, vai ficar numa documentação OpenAPI (Swagger) gerada a partir dos schemas Zod e disponível só no ambiente de desenvolvimento.
 
 ## Rodando localmente
 
@@ -105,9 +74,9 @@ Além das respostas listadas em cada rota, **todas** podem responder `429` (limi
 | `npm run test:unit` | Testes de unidade (Vitest) do `shared` e do backend: rápidos, sem banco nem Redis |
 | `npm run test:integration` | Testes de integração do backend contra um Postgres real (banco `*_test` em `TEST_DATABASE_URL`) |
 | `npm run test` | Todos os testes (Vitest) |
+| `npm run db:migrate` / `db:seed` / `db:studio` | Prisma |
 
 Como os testes são organizados e escritos: [docs/TESTES.md](docs/TESTES.md).
-| `npm run db:migrate` / `db:seed` / `db:studio` | Prisma |
 
 ## Deploy (produção)
 
