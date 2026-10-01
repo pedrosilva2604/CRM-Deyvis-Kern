@@ -1,7 +1,7 @@
 import type { NextFunction, Request, Response } from 'express';
 import type { Role } from '@prisma/client';
 import { ForbiddenError, UnauthorizedError } from '@/errors/app-errors';
-import type { SessionCookie } from '@/lib/session-cookie';
+import type { SessionCookie } from '@/infra/session-cookie';
 import { AUTH_ERRORS } from '@/errors/errors.constants';
 import type { ISessionService } from '@/services/session.service';
 

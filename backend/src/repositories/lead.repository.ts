@@ -1,104 +1,84 @@
-import { LeadContactStatus, Prisma, type PrismaClient } from '@prisma/client';
-import { ConflictError } from '@/errors/app-errors';
-import { LEAD_ERRORS } from '@/errors/errors.constants';
+import { Prisma } from '@prisma/client';
 import {
   leadOutputRelations,
+  notDeletedLeads,
   toLeadOutput,
   UNASSIGNED_LEADS_FILTER,
   type CreateLeadData,
-  type LeadBaseIndicators,
-  type LeadListFilters,
   type LeadListPage,
+  type LeadListQuery,
   type LeadOutput,
+  type LeadSearch,
+  type LeadWithRelations,
   type UpdateLeadData,
 } from '@/models/lead.model';
+import type { DatabaseClient } from '@/repositories/database-client';
 
-const UNIQUE_CONSTRAINT_VIOLATION = 'P2002';
-const MINIMUM_DIGITS_FOR_PHONE_SEARCH = 4;
 
 export interface ILeadRepository {
-  findLeadsPage(filters: LeadListFilters): Promise<LeadListPage>;
+  findLeadsPage(listQuery: LeadListQuery): Promise<LeadListPage>;
   findLeadById(leadId: string): Promise<LeadOutput | null>;
-  countLeadBaseIndicators(newLeadsSince: Date): Promise<LeadBaseIndicators>;
   findSourcesInUse(): Promise<string[]>;
   createLead(newLead: CreateLeadData): Promise<LeadOutput>;
   updateLead(leadId: string, leadChanges: UpdateLeadData): Promise<void>;
   softDeleteLead(leadId: string, deletedAt: Date): Promise<void>;
 }
 
-const notDeleted = { deletedAt: null } satisfies Prisma.LeadWhereInput;
-
-function buildSearchCondition(search: string): Prisma.LeadWhereInput {
-  const searchDigits = search.replace(/\D/g, '');
-  const conditions: Prisma.LeadWhereInput[] = [
-    { name: { contains: search, mode: 'insensitive' } },
-    { email: { contains: search, mode: 'insensitive' } },
-  ];
-  if (searchDigits.length >= MINIMUM_DIGITS_FOR_PHONE_SEARCH) conditions.push({ phone: { contains: searchDigits } });
-  return { OR: conditions };
+function buildSearchCondition(search: LeadSearch): Prisma.Sql {
+  if (search.searchedBy === 'phone') return Prisma.sql`"phone" = ${search.internationalPhone}`;
+  return Prisma.sql`"searchVector" @@ plainto_tsquery('simple', immutable_unaccent(${search.words}))`;
 }
 
-function buildAssignmentCondition(assignment: string): Prisma.LeadWhereInput {
-  return assignment === UNASSIGNED_LEADS_FILTER ? { assignedToId: null } : { assignedToId: assignment };
+function buildAssignmentCondition(assignment: string): Prisma.Sql {
+  if (assignment === UNASSIGNED_LEADS_FILTER) return Prisma.sql`"assignedToId" IS NULL`;
+  return Prisma.sql`"assignedToId" = ${assignment}::uuid`;
 }
 
-function buildListCondition(filters: LeadListFilters): Prisma.LeadWhereInput {
-  return {
-    ...notDeleted,
-    ...(filters.search && buildSearchCondition(filters.search)),
-    ...(filters.stageId && { stageId: filters.stageId }),
-    ...(filters.source && { source: filters.source }),
-    ...(filters.assignment && buildAssignmentCondition(filters.assignment)),
-    ...(filters.contactStatus && { contactStatus: filters.contactStatus }),
-  };
+function buildListCondition(listQuery: LeadListQuery): Prisma.Sql {
+  const conditions = [Prisma.sql`"deletedAt" IS NULL`];
+  if (listQuery.search) conditions.push(buildSearchCondition(listQuery.search));
+  if (listQuery.stageId) conditions.push(Prisma.sql`"stageId" = ${listQuery.stageId}::uuid`);
+  if (listQuery.source) conditions.push(Prisma.sql`"source" = ${listQuery.source}`);
+  if (listQuery.assignment) conditions.push(buildAssignmentCondition(listQuery.assignment));
+  if (listQuery.contactStatus) {
+    conditions.push(Prisma.sql`"contactStatus" = ${listQuery.contactStatus}::"LeadContactStatus"`);
+  }
+  return Prisma.join(conditions, ' AND ');
 }
 
-function translateUniqueViolation(error: unknown): never {
-  const isUniqueViolation =
-    error instanceof Prisma.PrismaClientKnownRequestError && error.code === UNIQUE_CONSTRAINT_VIOLATION;
-  if (!isUniqueViolation) throw error;
-  const violatedColumns = String((error.meta?.target as string[] | string | undefined) ?? '');
-  throw new ConflictError(violatedColumns.includes('email') ? LEAD_ERRORS.EMAIL_IN_USE : LEAD_ERRORS.PHONE_IN_USE);
+function keepPageOrder(pageLeadIds: string[], pageLeads: LeadWithRelations[]): LeadWithRelations[] {
+  const leadById = new Map(pageLeads.map((lead) => [lead.id, lead]));
+  return pageLeadIds.flatMap((leadId) => leadById.get(leadId) ?? []);
 }
 
 export class LeadRepository implements ILeadRepository {
-  constructor(private readonly prisma: PrismaClient) {}
+  constructor(private readonly prisma: DatabaseClient) {}
 
-  async findLeadsPage(filters: LeadListFilters): Promise<LeadListPage> {
-    const listCondition = buildListCondition(filters);
-    const [matchingLeads, totalMatchingLeads] = await this.prisma.$transaction([
-      this.prisma.lead.findMany({
-        where: listCondition,
-        include: leadOutputRelations,
-        orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
-        skip: (filters.page - 1) * filters.pageSize,
-        take: filters.pageSize,
-      }),
-      this.prisma.lead.count({ where: listCondition }),
+  async findLeadsPage(listQuery: LeadListQuery): Promise<LeadListPage> {
+    const listCondition = buildListCondition(listQuery);
+    const [pageLeadIds, totalMatchingLeads] = await Promise.all([
+      this.findPageLeadIds(listCondition, listQuery),
+      this.countMatchingLeads(listCondition),
     ]);
-    return { leads: matchingLeads.map(toLeadOutput), totalMatchingLeads, page: filters.page, pageSize: filters.pageSize };
+    return {
+      leads: await this.findLeadsInPageOrder(pageLeadIds),
+      totalMatchingLeads,
+      page: listQuery.page,
+      pageSize: listQuery.pageSize,
+    };
   }
 
   async findLeadById(leadId: string): Promise<LeadOutput | null> {
-    const lead = await this.prisma.lead.findFirst({ where: { id: leadId, ...notDeleted }, include: leadOutputRelations });
+    const lead = await this.prisma.lead.findFirst({
+      where: { id: leadId, ...notDeletedLeads },
+      include: leadOutputRelations,
+    });
     return lead ? toLeadOutput(lead) : null;
-  }
-
-  async countLeadBaseIndicators(newLeadsSince: Date): Promise<LeadBaseIndicators> {
-    const [totalLeads, newLeadsInLastSevenDays, unassignedLeads, invalidOrRejectedContacts, completeProfiles] =
-      await this.prisma.$transaction([
-        this.prisma.lead.count({ where: notDeleted }),
-        this.prisma.lead.count({ where: { ...notDeleted, enteredOn: { gte: newLeadsSince } } }),
-        this.prisma.lead.count({ where: { ...notDeleted, assignedToId: null } }),
-        this.prisma.lead.count({ where: { ...notDeleted, contactStatus: { not: LeadContactStatus.VALID } } }),
-        this.prisma.lead.count({ where: { ...notDeleted, email: { not: null } } }),
-      ]);
-    return { totalLeads, newLeadsInLastSevenDays, unassignedLeads, invalidOrRejectedContacts, completeProfiles };
   }
 
   async findSourcesInUse(): Promise<string[]> {
     const sources = await this.prisma.lead.findMany({
-      where: { ...notDeleted, source: { not: null } },
+      where: { ...notDeletedLeads, source: { not: null } },
       distinct: ['source'],
       select: { source: true },
       orderBy: { source: 'asc' },
@@ -107,23 +87,38 @@ export class LeadRepository implements ILeadRepository {
   }
 
   async createLead(newLead: CreateLeadData): Promise<LeadOutput> {
-    try {
-      const createdLead = await this.prisma.lead.create({ data: newLead, include: leadOutputRelations });
-      return toLeadOutput(createdLead);
-    } catch (error) {
-      return translateUniqueViolation(error);
-    }
+    const createdLead = await this.prisma.lead.create({ data: newLead, include: leadOutputRelations });
+    return toLeadOutput(createdLead);
   }
 
   async updateLead(leadId: string, leadChanges: UpdateLeadData): Promise<void> {
-    try {
-      await this.prisma.lead.update({ where: { id: leadId }, data: leadChanges, select: { id: true } });
-    } catch (error) {
-      translateUniqueViolation(error);
-    }
+    await this.prisma.lead.update({ where: { id: leadId }, data: leadChanges, select: { id: true } });
   }
 
   async softDeleteLead(leadId: string, deletedAt: Date): Promise<void> {
     await this.prisma.lead.update({ where: { id: leadId }, data: { deletedAt } });
+  }
+
+  private async findPageLeadIds(listCondition: Prisma.Sql, listQuery: LeadListQuery): Promise<string[]> {
+    const skippedLeads = (listQuery.page - 1) * listQuery.pageSize;
+    const pageRows = await this.prisma.$queryRaw<{ id: string }[]>`
+      SELECT "id" FROM "Lead" WHERE ${listCondition}
+      ORDER BY "createdAt" DESC, "id" ASC
+      LIMIT ${listQuery.pageSize} OFFSET ${skippedLeads}`;
+    return pageRows.map(({ id }) => id);
+  }
+
+  private async countMatchingLeads(listCondition: Prisma.Sql): Promise<number> {
+    const [countRow] = await this.prisma.$queryRaw<{ totalMatchingLeads: bigint }[]>`
+      SELECT COUNT(*) AS "totalMatchingLeads" FROM "Lead" WHERE ${listCondition}`;
+    return Number(countRow?.totalMatchingLeads ?? 0);
+  }
+
+  private async findLeadsInPageOrder(pageLeadIds: string[]): Promise<LeadOutput[]> {
+    const pageLeads = await this.prisma.lead.findMany({
+      where: { id: { in: pageLeadIds } },
+      include: leadOutputRelations,
+    });
+    return keepPageOrder(pageLeadIds, pageLeads).map(toLeadOutput);
   }
 }

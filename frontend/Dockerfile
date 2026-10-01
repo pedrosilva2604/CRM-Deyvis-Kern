@@ -8,10 +8,17 @@ RUN npm ci --workspace frontend --ignore-scripts
 COPY shared/ shared/
 COPY frontend/ frontend/
 ARG VITE_APP_NAME
-ENV VITE_APP_NAME=${VITE_APP_NAME}
-RUN test -n "$VITE_APP_NAME" && npm run build --workspace frontend
+ARG VITE_LEAD_IMPORT_MAX_ROWS
+ARG VITE_LEAD_IMPORT_MAX_FILE_BYTES
+ENV VITE_APP_NAME=${VITE_APP_NAME} \
+    VITE_LEAD_IMPORT_MAX_ROWS=${VITE_LEAD_IMPORT_MAX_ROWS} \
+    VITE_LEAD_IMPORT_MAX_FILE_BYTES=${VITE_LEAD_IMPORT_MAX_FILE_BYTES}
+RUN test -n "$VITE_APP_NAME" \
+    && test -n "$VITE_LEAD_IMPORT_MAX_ROWS" \
+    && test -n "$VITE_LEAD_IMPORT_MAX_FILE_BYTES" \
+    && npm run build --workspace frontend
 
-FROM nginx:1.30.5-alpine AS runtime
+FROM nginxinc/nginx-unprivileged:1.30.5-alpine AS runtime
 COPY --chmod=755 frontend/nginx/10-require-environment.sh /docker-entrypoint.d/10-require-environment.sh
 COPY frontend/nginx/default.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=build /app/frontend/dist /usr/share/nginx/html

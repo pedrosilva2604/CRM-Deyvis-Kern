@@ -11,6 +11,7 @@ import { UNASSIGNED_LEADS_FILTER } from '@/models/lead.model';
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAXIMUM_PAGE_SIZE = 100;
+const MAXIMUM_PAGE = 100_000;
 const MAXIMUM_SEARCH_LENGTH = 100;
 const MAXIMUM_SOURCE_LENGTH = 60;
 const MAXIMUM_TAG_LENGTH = 30;
@@ -115,7 +116,7 @@ export const leadListFiltersSchema: ZodType<LeadListFilters, ZodTypeDef, unknown
     source: z.string().trim().max(MAXIMUM_SOURCE_LENGTH).optional(),
     assignment: z.union([z.literal(UNASSIGNED_LEADS_FILTER), z.string().uuid('Responsável inválido')]).optional(),
     contactStatus: z.nativeEnum(LeadContactStatus).optional(),
-    page: z.coerce.number().int().min(1).default(1),
+    page: z.coerce.number().int().min(1).max(MAXIMUM_PAGE).default(1),
     pageSize: z.coerce.number().int().min(1).max(MAXIMUM_PAGE_SIZE).default(DEFAULT_PAGE_SIZE),
   })
   .strict('Filtro não permitido');

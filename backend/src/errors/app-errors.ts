@@ -1,4 +1,4 @@
-import { HttpStatus, type HttpStatusCode } from '@/lib/http-status';
+import { HttpStatus, type HttpStatusCode } from '@/infra/http-status';
 
 export abstract class AppError extends Error {
   abstract readonly statusCode: HttpStatusCode;
@@ -27,4 +27,8 @@ export class NotFoundError extends AppError {
 
 export class ConflictError extends AppError {
   readonly statusCode = HttpStatus.CONFLICT;
+}
+
+export class DatabaseUnavailableError extends AppError {
+  readonly statusCode = HttpStatus.SERVICE_UNAVAILABLE;
 }

@@ -1,4 +1,4 @@
-import { Role, type PrismaClient, type Theme } from '@prisma/client';
+import { Role, type Theme } from '@prisma/client';
 import type { LeadPersonOutput } from '@/models/lead.model';
 import {
   toRegisteredUserOutput,
@@ -10,6 +10,7 @@ import {
   type UserCredentials,
   type UserOutput,
 } from '@/models/user.model';
+import type { DatabaseClient } from '@/repositories/database-client';
 
 export interface IUserRepository {
   createUser(data: CreateUserData): Promise<RegisteredUserOutput>;
@@ -29,7 +30,7 @@ export interface IUserRepository {
 }
 
 export class UserRepository implements IUserRepository {
-  constructor(private readonly prisma: PrismaClient) {}
+  constructor(private readonly prisma: DatabaseClient) {}
 
   async createUser(data: CreateUserData): Promise<RegisteredUserOutput> {
     const user = await this.prisma.user.create({ data });

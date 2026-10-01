@@ -1,59 +1,119 @@
 import { AlertTriangle, Sparkles, UserRoundX, Users, UserCheck } from 'lucide-react';
-import { Alert } from '@/components/ui/Alert';
 import { StatCard } from '@/components/ui/StatCard';
-import { useLeadBaseIndicators } from '@/hooks/useLeads';
-import { formatInteger, formatShareOfTotal } from '@/lib/formatters';
+import {
+  useCompleteProfiles,
+  useInvalidOrRejectedContacts,
+  useNewLeadsInLastSevenDays,
+  useTotalLeads,
+  useUnassignedLeads,
+} from '@/hooks/useLeads';
+import { formatInteger, formatPercentage } from '@/lib/formatters';
+
+const UNAVAILABLE_INDICATOR_VALUE = '—';
+const UNAVAILABLE_INDICATOR_DESCRIPTION = 'Não foi possível carregar este indicador';
+
+function formatIndicatorValue(quantity: number | undefined, isError: boolean) {
+  return isError ? UNAVAILABLE_INDICATOR_VALUE : formatInteger(quantity ?? 0);
+}
+
+function describeShareOfBase(shareOfBase: number | undefined, detail: string) {
+  if (shareOfBase === undefined) return detail;
+  return `${formatPercentage(shareOfBase)} da base ${detail.toLowerCase()}`;
+}
+
+function TotalLeadsCard() {
+  const { data, isPending, isError } = useTotalLeads();
+  return (
+    <StatCard
+      label="Total de leads"
+      icon={Users}
+      tone="accent"
+      loading={isPending}
+      value={formatIndicatorValue(data?.totalLeads, isError)}
+      description={isError ? UNAVAILABLE_INDICATOR_DESCRIPTION : 'Tamanho histórico da base'}
+    />
+  );
+}
+
+function NewLeadsCard() {
+  const { data, isPending, isError } = useNewLeadsInLastSevenDays();
+  return (
+    <StatCard
+      label="Novos (7 dias)"
+      icon={Sparkles}
+      tone="success"
+      loading={isPending}
+      value={formatIndicatorValue(data?.newLeadsInLastSevenDays, isError)}
+      description={isError ? UNAVAILABLE_INDICATOR_DESCRIPTION : 'Ritmo de crescimento recente'}
+    />
+  );
+}
+
+function UnassignedLeadsCard() {
+  const { data, isPending, isError } = useUnassignedLeads();
+  const unassignedLeads = data?.unassignedLeads;
+  return (
+    <StatCard
+      label="Sem responsável"
+      icon={UserRoundX}
+      tone="warning"
+      loading={isPending}
+      value={formatIndicatorValue(unassignedLeads, isError)}
+      description={
+        isError
+          ? UNAVAILABLE_INDICATOR_DESCRIPTION
+          : describeShareOfBase(data?.shareOfBase, 'Aguardando distribuição')
+      }
+    />
+  );
+}
+
+function InvalidOrRejectedContactsCard() {
+  const { data, isPending, isError } = useInvalidOrRejectedContacts();
+  const invalidOrRejectedContacts = data?.invalidOrRejectedContacts;
+  return (
+    <StatCard
+      label="Inválidos ou rejeitados"
+      icon={AlertTriangle}
+      tone="danger"
+      loading={isPending}
+      value={formatIndicatorValue(invalidOrRejectedContacts, isError)}
+      description={
+        isError
+          ? UNAVAILABLE_INDICATOR_DESCRIPTION
+          : describeShareOfBase(data?.shareOfBase, 'Com contato inválido ou spam')
+      }
+    />
+  );
+}
+
+function CompleteProfilesCard() {
+  const { data, isPending, isError } = useCompleteProfiles();
+  const completeProfiles = data?.completeProfiles;
+  return (
+    <StatCard
+      label="Cadastros completos"
+      icon={UserCheck}
+      tone="neutral"
+      loading={isPending}
+      value={formatIndicatorValue(completeProfiles, isError)}
+      description={
+        isError
+          ? UNAVAILABLE_INDICATOR_DESCRIPTION
+          : describeShareOfBase(data?.shareOfBase, 'Com nome, e-mail e telefone')
+      }
+    />
+  );
+}
 
 export function LeadBaseIndicatorsPanel() {
-  const { data: indicators, isPending, isError } = useLeadBaseIndicators();
-
-  if (isError) return <Alert variant="error">Não foi possível carregar os indicadores da base de leads.</Alert>;
-
-  const totalLeads = indicators?.totalLeads ?? 0;
-  const shareOfBase = (quantity: number) => `${formatShareOfTotal(quantity, totalLeads)} da base`;
-
   return (
     <section aria-label="Indicadores da base de leads" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-      <StatCard
-        label="Total de leads"
-        icon={Users}
-        tone="accent"
-        loading={isPending}
-        value={formatInteger(totalLeads)}
-        description="Tamanho histórico da base"
-      />
-      <StatCard
-        label="Novos (7 dias)"
-        icon={Sparkles}
-        tone="success"
-        loading={isPending}
-        value={formatInteger(indicators?.newLeadsInLastSevenDays ?? 0)}
-        description="Ritmo de crescimento recente"
-      />
-      <StatCard
-        label="Sem responsável"
-        icon={UserRoundX}
-        tone="warning"
-        loading={isPending}
-        value={formatInteger(indicators?.unassignedLeads ?? 0)}
-        description={indicators ? `${shareOfBase(indicators.unassignedLeads)} aguardando distribuição` : 'Aguardando distribuição'}
-      />
-      <StatCard
-        label="Inválidos ou rejeitados"
-        icon={AlertTriangle}
-        tone="danger"
-        loading={isPending}
-        value={formatInteger(indicators?.invalidOrRejectedContacts ?? 0)}
-        description={indicators ? `${shareOfBase(indicators.invalidOrRejectedContacts)}: contato inválido ou spam` : 'Contato inválido ou spam'}
-      />
-      <StatCard
-        label="Cadastros completos"
-        icon={UserCheck}
-        tone="neutral"
-        loading={isPending}
-        value={formatInteger(indicators?.completeProfiles ?? 0)}
-        description={indicators ? `${shareOfBase(indicators.completeProfiles)} com nome, e-mail e telefone` : 'Nome, e-mail e telefone'}
-      />
+      <TotalLeadsCard />
+      <NewLeadsCard />
+      <UnassignedLeadsCard />
+      <InvalidOrRejectedContactsCard />
+      <CompleteProfilesCard />
     </section>
   );
 }

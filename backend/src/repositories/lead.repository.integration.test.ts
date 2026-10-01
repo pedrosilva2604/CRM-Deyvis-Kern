@@ -1,0 +1,98 @@
+import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import type { LeadSearch } from '@/models/lead.model';
+import { TestDatabase } from '@/testing/integration/test-database';
+import { LeadRepository } from './lead.repository';
+
+const database = new TestDatabase();
+const leads = new LeadRepository(database.client);
+
+async function namesFoundBy(search: LeadSearch): Promise<string[]> {
+  const leadListPage = await leads.findLeadsPage({ search, page: 1, pageSize: 20 });
+  return leadListPage.leads.map((lead) => lead.name).sort();
+}
+
+function searchByWords(words: string): LeadSearch {
+  return { searchedBy: 'words', words };
+}
+
+function searchByPhone(internationalPhone: string): LeadSearch {
+  return { searchedBy: 'phone', internationalPhone };
+}
+
+beforeEach(async () => {
+  await database.prepareEmptyDatabase();
+});
+
+afterAll(async () => {
+  await database.disconnect();
+});
+
+describe('Busca de leads por nome e e-mail', () => {
+  it('procura a palavra inteira: "maria" encontra Maria, mas não Mariana', async () => {
+    await database.addLead({ name: 'Maria Souza', phone: '+5511900000001' });
+    await database.addLead({ name: 'Mariana Lima', phone: '+5511900000002' });
+
+    expect(await namesFoundBy(searchByWords('maria'))).toEqual(['Maria Souza']);
+  });
+
+  it('ignora acentos e maiúsculas: "joao" encontra João', async () => {
+    await database.addLead({ name: 'João Pereira', phone: '+5511900000001' });
+
+    expect(await namesFoundBy(searchByWords('JOAO'))).toEqual(['João Pereira']);
+  });
+
+  it('exige todas as palavras digitadas', async () => {
+    await database.addLead({ name: 'Maria Souza', phone: '+5511900000001' });
+    await database.addLead({ name: 'Maria Lima', phone: '+5511900000002' });
+
+    expect(await namesFoundBy(searchByWords('maria lima'))).toEqual(['Maria Lima']);
+  });
+
+  it('encontra pelo e-mail completo', async () => {
+    await database.addLead({ name: 'Maria Souza', phone: '+5511900000001', email: 'maria.souza@empresa.com' });
+    await database.addLead({ name: 'Outra pessoa', phone: '+5511900000002', email: 'outra@empresa.com' });
+
+    expect(await namesFoundBy(searchByWords('maria.souza@empresa.com'))).toEqual(['Maria Souza']);
+  });
+
+  it('não mostra leads excluídos', async () => {
+    await database.addLead({ name: 'Maria Souza', phone: '+5511900000001', deleted: true });
+
+    expect(await namesFoundBy(searchByWords('maria'))).toEqual([]);
+  });
+
+  it('trata o texto digitado como dado, não como SQL', async () => {
+    await database.addLead({ name: 'Maria Souza', phone: '+5511900000001' });
+
+    expect(await namesFoundBy(searchByWords(`maria'); DROP TABLE "Lead"; --`))).toEqual([]);
+    expect(await database.findPhonesOfAllLeads()).toEqual(['+5511900000001']);
+  });
+});
+
+describe('Busca de leads por telefone', () => {
+  it('encontra somente o número exato', async () => {
+    await database.addLead({ name: 'Maria Souza', phone: '+5511900000001' });
+    await database.addLead({ name: 'João Pereira', phone: '+5511900000010' });
+
+    expect(await namesFoundBy(searchByPhone('+5511900000001'))).toEqual(['Maria Souza']);
+  });
+
+  it('não encontra nada com parte do número', async () => {
+    await database.addLead({ name: 'Maria Souza', phone: '+5511900000001' });
+
+    expect(await namesFoundBy(searchByPhone('+55119000'))).toEqual([]);
+  });
+});
+
+describe('Paginação da lista de leads', () => {
+  it('informa o total encontrado mesmo mostrando só uma página', async () => {
+    await database.addLead({ name: 'Lead 1', phone: '+5511900000001' });
+    await database.addLead({ name: 'Lead 2', phone: '+5511900000002' });
+    await database.addLead({ name: 'Lead 3', phone: '+5511900000003' });
+
+    const secondPage = await leads.findLeadsPage({ page: 2, pageSize: 2 });
+
+    expect(secondPage.totalMatchingLeads).toBe(3);
+    expect(secondPage.leads).toHaveLength(1);
+  });
+});

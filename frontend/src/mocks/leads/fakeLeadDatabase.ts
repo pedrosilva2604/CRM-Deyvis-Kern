@@ -1,16 +1,24 @@
 import type {
-  ImportLeadsRequest,
-  ImportLeadsResult,
+  CompleteProfilesIndicator,
+  InvalidOrRejectedContactsIndicator,
   LeadAssignee,
-  LeadBaseIndicators,
   LeadContactStatus,
   LeadFilterOptions,
+  LeadImportProgress,
   LeadListItem,
   LeadListPage,
   LeadPipeline,
+  NewLeadsIndicator,
+  TotalLeadsIndicator,
+  UnassignedLeadsIndicator,
 } from '@/types/lead';
 import { UNASSIGNED_LEADS_FILTER } from '@/types/lead';
-import { readLeadPhone } from '@crm/shared';
+import {
+  readLeadPhone,
+  readLeadSpreadsheet,
+  type LeadSpreadsheetReading,
+  type LeadSpreadsheetRowToImport,
+} from '@crm/shared';
 
 const FAKE_LEAD_COUNT = 186;
 const RANDOM_SEED = 20260928;
@@ -158,15 +166,27 @@ function createFakeLeads() {
 
 let storedLeads: LeadListItem[] = createFakeLeads();
 
+function removeAccentsAndCase(text: string) {
+  return text.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+}
+
+function splitIntoWords(text: string) {
+  return removeAccentsAndCase(text).split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+}
+
+function splitSearchTerm(searchTerm: string) {
+  return removeAccentsAndCase(searchTerm)
+    .split(/\s+/)
+    .flatMap((searchedPiece) => (searchedPiece.includes('@') ? [searchedPiece] : splitIntoWords(searchedPiece)));
+}
+
 function matchesSearchTerm(lead: LeadListItem, searchTerm: string) {
   if (!searchTerm) return true;
-  const searchDigits = searchTerm.replace(/\D/g, '');
-  const normalizedTerm = searchTerm.toLowerCase();
-  return (
-    lead.name.toLowerCase().includes(normalizedTerm) ||
-    (lead.email ?? '').toLowerCase().includes(normalizedTerm) ||
-    (searchDigits.length >= 4 && lead.phone.includes(searchDigits))
-  );
+  const phoneReading = readLeadPhone(searchTerm);
+  if (phoneReading.status === 'valid') return lead.phone === phoneReading.internationalPhone;
+  const leadWords = new Set([...splitIntoWords(lead.name), (lead.email ?? '').toLowerCase()]);
+  const searchedWords = splitSearchTerm(searchTerm);
+  return searchedWords.length > 0 && searchedWords.every((searchedWord) => leadWords.has(searchedWord));
 }
 
 function matchesAssignment(lead: LeadListItem, assignment: string) {
@@ -205,15 +225,34 @@ function hasCompleteProfile(lead: LeadListItem) {
   return lead.name.trim() !== '' && lead.phone !== '' && lead.email !== null;
 }
 
-export function calculateLeadBaseIndicators(): LeadBaseIndicators {
+export function countTotalLeads(): TotalLeadsIndicator {
+  return { totalLeads: storedLeads.length };
+}
+
+export function countNewLeadsInLastSevenDays(): NewLeadsIndicator {
   const newLeadThreshold = Date.now() - NEW_LEAD_WINDOW_DAYS * MILLISECONDS_PER_DAY;
   return {
-    totalLeads: storedLeads.length,
     newLeadsInLastSevenDays: storedLeads.filter((lead) => new Date(lead.enteredOn).getTime() >= newLeadThreshold).length,
-    unassignedLeads: storedLeads.filter((lead) => lead.assignedTo === null).length,
-    invalidOrRejectedContacts: storedLeads.filter((lead) => lead.contactStatus !== 'VALID').length,
-    completeProfiles: storedLeads.filter(hasCompleteProfile).length,
   };
+}
+
+function calculateShareOfBase(quantity: number) {
+  return storedLeads.length === 0 ? 0 : quantity / storedLeads.length;
+}
+
+export function countUnassignedLeads(): UnassignedLeadsIndicator {
+  const unassignedLeads = storedLeads.filter((lead) => lead.assignedTo === null).length;
+  return { unassignedLeads, shareOfBase: calculateShareOfBase(unassignedLeads) };
+}
+
+export function countInvalidOrRejectedContacts(): InvalidOrRejectedContactsIndicator {
+  const invalidOrRejectedContacts = storedLeads.filter((lead) => lead.contactStatus !== 'VALID').length;
+  return { invalidOrRejectedContacts, shareOfBase: calculateShareOfBase(invalidOrRejectedContacts) };
+}
+
+export function countCompleteProfiles(): CompleteProfilesIndicator {
+  const completeProfiles = storedLeads.filter(hasCompleteProfile).length;
+  return { completeProfiles, shareOfBase: calculateShareOfBase(completeProfiles) };
 }
 
 export function listFilterOptions(): LeadFilterOptions {
@@ -225,37 +264,65 @@ export function listFilterOptions(): LeadFilterOptions {
   };
 }
 
-export function importLeads(importLeadsRequest: ImportLeadsRequest): ImportLeadsResult | null {
-  const stage = salesPipeline.stages.find((pipelineStage) => pipelineStage.id === importLeadsRequest.stageId);
-  if (importLeadsRequest.pipelineId !== salesPipeline.id || !stage) return null;
+const storedLeadImports = new Map<string, LeadImportProgress>();
 
-  const phonesAlreadyInPipeline = new Set(storedLeads.map((lead) => lead.phone));
+function isAlreadyStored(rowToImport: LeadSpreadsheetRowToImport) {
+  return storedLeads.some(
+    (lead) => lead.phone === rowToImport.phone || (rowToImport.email !== null && lead.email === rowToImport.email),
+  );
+}
+
+function toFakeLead(rowToImport: LeadSpreadsheetRowToImport, fakeLeadId: string, now: string): LeadListItem {
+  const firstStage = salesPipeline.stages[0] as LeadPipeline['stages'][number];
+  return {
+    id: fakeLeadId,
+    name: rowToImport.name,
+    phone: rowToImport.phone,
+    phoneCountry: rowToImport.phoneCountry,
+    email: rowToImport.email,
+    source: null,
+    tags: [],
+    value: null,
+    contactStatus: 'VALID',
+    pipeline: { id: salesPipeline.id, name: salesPipeline.name },
+    stage: firstStage,
+    assignedTo: null,
+    unreadCount: 0,
+    lastMessageAt: null,
+    enteredOn: rowToImport.enteredOn ?? now.slice(0, 10),
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export function importLeadSpreadsheet(csvText: string, maximumRows: number): LeadSpreadsheetReading & { importId?: string } {
+  const spreadsheetReading = readLeadSpreadsheet(csvText, new Date(), { maximumRows });
+  if (spreadsheetReading.status === 'unreadable') return spreadsheetReading;
+
+  const { content } = spreadsheetReading;
   const now = new Date().toISOString();
-  let skippedDuplicateLeads = 0;
-  const newLeads: LeadListItem[] = [];
-
-  for (const leadToImport of importLeadsRequest.leads) {
-    if (phonesAlreadyInPipeline.has(leadToImport.phone)) {
-      skippedDuplicateLeads += 1;
-      continue;
-    }
-    phonesAlreadyInPipeline.add(leadToImport.phone);
-    newLeads.push({
-      ...leadToImport,
-      phoneCountry: countryOfPhone(leadToImport.phone),
-      id: crypto.randomUUID(),
-      contactStatus: 'VALID',
-      pipeline: { id: salesPipeline.id, name: salesPipeline.name },
-      stage,
-      assignedTo: null,
-      unreadCount: 0,
-      lastMessageAt: null,
-      enteredOn: now.slice(0, 10),
-      createdAt: now,
-      updatedAt: now,
-    });
-  }
-
+  const rowsNotYetStored = content.rowsToImport.filter((rowToImport) => !isAlreadyStored(rowToImport));
+  const fakeImportNumber = storedLeadImports.size + 1;
+  const newLeads = rowsNotYetStored.map((rowToImport, rowIndex) =>
+    toFakeLead(rowToImport, `d${String(fakeImportNumber).padStart(7, '0')}-0000-4000-8000-${String(rowIndex).padStart(12, '0')}`, now),
+  );
   storedLeads = [...newLeads, ...storedLeads];
-  return { importedLeads: newLeads.length, skippedDuplicateLeads };
+
+  const importId = `e0000000-0000-4000-8000-${String(fakeImportNumber).padStart(12, '0')}`;
+  storedLeadImports.set(importId, {
+    status: 'COMPLETED',
+    totalRows: content.totalRows,
+    invalidRows: content.invalidRows.length,
+    duplicateRowsInFile: content.duplicateRows.length,
+    rowsToImport: content.rowsToImport.length,
+    importedLeads: newLeads.length,
+    skippedExistingLeads: content.rowsToImport.length - newLeads.length,
+    createdAt: now,
+    finishedAt: now,
+  });
+  return { ...spreadsheetReading, importId };
+}
+
+export function findLeadImportProgress(importId: string) {
+  return storedLeadImports.get(importId) ?? null;
 }

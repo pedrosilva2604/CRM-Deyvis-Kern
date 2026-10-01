@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Upload, UsersRound } from 'lucide-react';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
@@ -6,19 +7,19 @@ import { Pagination } from '@/components/ui/Pagination';
 import { env } from '@/config/env';
 import { LEADS_PAGE_SIZE } from '@/api/leadsApi';
 import { useLeadFilterOptions, useLeadList } from '@/hooks/useLeads';
+import { ImportLeadsDialog } from './import/ImportLeadsDialog';
 import { LeadBaseIndicatorsPanel } from './LeadBaseIndicatorsPanel';
 import { LeadDetailsDrawer } from './LeadDetailsDrawer';
 import { LeadListFiltersBar } from './LeadListFiltersBar';
 import { LeadsTable } from './LeadsTable';
 import { useLeadsPageUrlState } from './useLeadsPageUrlState';
 
-const IMPORT_UNDER_CONSTRUCTION = 'Importação de leads em construção';
-
 export function LeadsPage() {
   const { filters, hasActiveFilters, updateFilters, clearFilters, selectedLeadId, openLeadDetails, closeLeadDetails } =
     useLeadsPageUrlState();
   const { data: leadListPage, isPending, isError, isPlaceholderData, refetch } = useLeadList(filters);
   const { data: filterOptions } = useLeadFilterOptions();
+  const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
 
   const leads = leadListPage?.leads ?? [];
   const hasNoLeadsAtAll = !isPending && !isError && leads.length === 0 && !hasActiveFilters;
@@ -30,7 +31,7 @@ export function LeadsPage() {
         title="Leads"
         description="Toda a base de contatos do CRM"
         actions={
-          <Button disabled title={IMPORT_UNDER_CONSTRUCTION}>
+          <Button onClick={() => setIsImportDialogOpen(true)}>
             <Upload size={16} />
             Importar leads
           </Button>
@@ -73,7 +74,7 @@ export function LeadsPage() {
             <div className="flex flex-col items-center gap-3 px-5 py-14 text-center">
               <UsersRound size={32} className="text-slate-300 dark:text-slate-600" />
               <p className="text-sm text-slate-600 dark:text-slate-300">Nenhum lead cadastrado ainda.</p>
-              <Button disabled title={IMPORT_UNDER_CONSTRUCTION}>
+              <Button onClick={() => setIsImportDialogOpen(true)}>
                 <Upload size={16} />
                 Importar a primeira planilha
               </Button>
@@ -105,6 +106,7 @@ export function LeadsPage() {
       </div>
 
       {selectedLeadId && <LeadDetailsDrawer leadId={selectedLeadId} onClose={closeLeadDetails} />}
+      {isImportDialogOpen && <ImportLeadsDialog onClose={() => setIsImportDialogOpen(false)} />}
     </>
   );
 }

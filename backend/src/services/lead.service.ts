@@ -2,19 +2,19 @@ import { Role } from '@prisma/client';
 import { readLeadPhone, readSpreadsheetDate } from '@crm/shared';
 import { BadRequestError, ForbiddenError, NotFoundError } from '@/errors/app-errors';
 import { AUTH_ERRORS, LEAD_ERRORS } from '@/errors/errors.constants';
-import type { BusinessCalendar } from '@/lib/business-calendar';
-import type { Clock } from '@/lib/clock';
+import type { BusinessCalendar } from '@/infra/business-calendar';
+import type { Clock } from '@/infra/clock';
 import type { AuditLogInput } from '@/models/audit.model';
 import type { LoggedUserContext } from '@/models/common.model';
 import type {
   CreateLeadInput,
   DeleteLeadRequest,
-  LeadBaseIndicators,
   LeadDetailsRequest,
   LeadFilterOptions,
   LeadListFilters,
   LeadListPage,
   LeadOutput,
+  LeadSearch,
   LeadUpdateResult,
   UpdatableLeadField,
   UpdateLeadData,
@@ -26,12 +26,9 @@ import type { IPipelineRepository, StageLocation } from '@/repositories/pipeline
 import type { IUserRepository } from '@/repositories/user.repository';
 import type { IAuditService } from './audit.service';
 
-const NEW_LEAD_WINDOW_DAYS = 7;
-
 export interface ILeadService {
   listLeads(filters: LeadListFilters): Promise<LeadListPage>;
   getLeadDetails(request: LeadDetailsRequest): Promise<LeadOutput>;
-  getLeadBaseIndicators(): Promise<LeadBaseIndicators>;
   getLeadFilterOptions(): Promise<LeadFilterOptions>;
   createLead(newLead: CreateLeadInput, loggedUserContext: LoggedUserContext): Promise<LeadOutput>;
   updateLead(request: UpdateLeadRequest, loggedUserContext: LoggedUserContext): Promise<LeadUpdateResult>;
@@ -48,17 +45,15 @@ export class LeadService implements ILeadService {
     private readonly clock: Clock,
   ) {}
 
-  async listLeads(filters: LeadListFilters): Promise<LeadListPage> {
-    return await this.leadRepository.findLeadsPage(filters);
+  async listLeads({ search, ...filters }: LeadListFilters): Promise<LeadListPage> {
+    return await this.leadRepository.findLeadsPage({
+      ...filters,
+      ...(search && { search: this.interpretLeadSearch(search) }),
+    });
   }
 
   async getLeadDetails({ targetLeadId }: LeadDetailsRequest): Promise<LeadOutput> {
     return await this.findExistingLeadOrFail(targetLeadId);
-  }
-
-  async getLeadBaseIndicators(): Promise<LeadBaseIndicators> {
-    const firstDayCountedAsNew = this.businessCalendar.isoDateDaysBeforeToday(NEW_LEAD_WINDOW_DAYS - 1);
-    return await this.leadRepository.countLeadBaseIndicators(this.businessCalendar.toDatabaseDate(firstDayCountedAsNew));
   }
 
   async getLeadFilterOptions(): Promise<LeadFilterOptions> {
@@ -189,6 +184,12 @@ export class LeadService implements ILeadService {
       throw new BadRequestError(dateReading.status === 'invalid' ? dateReading.reason : 'Informe a data de entrada');
     }
     return this.businessCalendar.toDatabaseDate(dateReading.isoDate);
+  }
+
+  private interpretLeadSearch(search: string): LeadSearch {
+    const phoneReading = readLeadPhone(search);
+    if (phoneReading.status === 'valid') return { searchedBy: 'phone', internationalPhone: phoneReading.internationalPhone };
+    return { searchedBy: 'words', words: search };
   }
 
   private countryOfPhone(internationalPhone: string): string | null {

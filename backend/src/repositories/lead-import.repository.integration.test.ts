@@ -1,0 +1,176 @@
+import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { ConflictError } from '@/errors/app-errors';
+import { LEAD_IMPORT_ERRORS } from '@/errors/errors.constants';
+import { leadsToCreateFrom, TestDatabase } from '@/testing/integration/test-database';
+import { LeadImportChunkAlreadyProcessedError, LeadImportRepository } from './lead-import.repository';
+
+const database = new TestDatabase();
+const leadImports = new LeadImportRepository(database.client);
+const finishedAt = new Date('2026-09-30T12:00:00.000Z');
+
+function newImportRequestedBy(requestedById: string) {
+  return {
+    totalRows: 1,
+    invalidRows: 0,
+    duplicateRowsInFile: 0,
+    requestedById,
+    ...database.funnel,
+    rows: [{ rowNumber: 1, name: 'Lead', phone: '+5511900000001', phoneCountry: 'BR', email: null, enteredOn: finishedAt }],
+  };
+}
+
+beforeEach(async () => {
+  await database.prepareEmptyDatabase();
+});
+
+afterAll(async () => {
+  await database.disconnect();
+});
+
+describe('Gravação de um pedaço da importação', () => {
+  it('grava os leads e avança o contador da importação juntos', async () => {
+    const maria = await database.addUser('Maria');
+    const importId = await database.addLeadImport({ requestedById: maria, status: 'PROCESSING' });
+
+    await leadImports.importChunk({
+      importId,
+      processedRowsBefore: 0,
+      leadsToCreate: leadsToCreateFrom(['+5511900000001', '+5511900000002'], database.funnel),
+    });
+
+    expect(await database.findPhonesOfAllLeads()).toEqual(['+5511900000001', '+5511900000002']);
+    expect(await database.findLeadImport(importId)).toMatchObject({ processedRows: 2, importedLeads: 2 });
+  });
+
+  it('não duplica o lead cujo telefone já está no CRM e conta como "já existia"', async () => {
+    const maria = await database.addUser('Maria');
+    await database.addLead({ name: 'Cliente antigo', phone: '+5511900000001' });
+    const importId = await database.addLeadImport({ requestedById: maria, status: 'PROCESSING' });
+
+    const importedLeads = await leadImports.importChunk({
+      importId,
+      processedRowsBefore: 0,
+      leadsToCreate: leadsToCreateFrom(['+5511900000001', '+5511900000002'], database.funnel),
+    });
+
+    expect(importedLeads).toBe(1);
+    expect(await database.findPhonesOfAllLeads()).toEqual(['+5511900000001', '+5511900000002']);
+    expect(await database.findLeadImport(importId)).toMatchObject({ importedLeads: 1, skippedExistingLeads: 1 });
+  });
+
+  it('recusa o pedaço que outra execução já gravou e desfaz os leads que tentou inserir', async () => {
+    const maria = await database.addUser('Maria');
+    const importId = await database.addLeadImport({ requestedById: maria, status: 'PROCESSING' });
+    await leadImports.importChunk({
+      importId,
+      processedRowsBefore: 0,
+      leadsToCreate: leadsToCreateFrom(['+5511900000001'], database.funnel),
+    });
+
+    const secondExecution = leadImports.importChunk({
+      importId,
+      processedRowsBefore: 0,
+      leadsToCreate: leadsToCreateFrom(['+5511900000099'], database.funnel),
+    });
+
+    await expect(secondExecution).rejects.toBeInstanceOf(LeadImportChunkAlreadyProcessedError);
+    expect(await database.findPhonesOfAllLeads()).toEqual(['+5511900000001']);
+    expect(await database.findLeadImport(importId)).toMatchObject({ processedRows: 1, importedLeads: 1 });
+  });
+});
+
+describe('Uma importação em andamento por usuário', () => {
+  it('aceita só uma de duas importações enviadas ao mesmo tempo pelo mesmo usuário', async () => {
+    const maria = await database.addUser('Maria');
+
+    const [firstSending, secondSending] = await Promise.allSettled([
+      leadImports.createLeadImport(newImportRequestedBy(maria)),
+      leadImports.createLeadImport(newImportRequestedBy(maria)),
+    ]);
+    const sendings = [firstSending, secondSending];
+
+    expect(sendings.filter((sending) => sending.status === 'fulfilled')).toHaveLength(1);
+    const refusedSending = sendings.find((sending) => sending.status === 'rejected');
+    expect(refusedSending?.reason).toBeInstanceOf(ConflictError);
+    expect(refusedSending?.reason.message).toBe(LEAD_IMPORT_ERRORS.ALREADY_RUNNING);
+  });
+
+  it('deixa usuários diferentes importarem ao mesmo tempo', async () => {
+    const maria = await database.addUser('Maria');
+    const joao = await database.addUser('João');
+
+    const sendings = await Promise.allSettled([
+      leadImports.createLeadImport(newImportRequestedBy(maria)),
+      leadImports.createLeadImport(newImportRequestedBy(joao)),
+    ]);
+
+    expect(sendings.map((sending) => sending.status)).toEqual(['fulfilled', 'fulfilled']);
+  });
+
+  it('libera uma nova importação depois que a anterior terminou', async () => {
+    const maria = await database.addUser('Maria');
+    await database.addLeadImport({ requestedById: maria, status: 'COMPLETED' });
+    await database.addLeadImport({ requestedById: maria, status: 'FAILED' });
+
+    await expect(leadImports.createLeadImport(newImportRequestedBy(maria))).resolves.toEqual(expect.any(String));
+  });
+});
+
+describe('Linhas guardadas da planilha', () => {
+  it('são apagadas quando a importação é concluída', async () => {
+    const maria = await database.addUser('Maria');
+    const importId = await database.addLeadImport({
+      requestedById: maria,
+      status: 'PROCESSING',
+      phonesToImport: ['+5511900000001', '+5511900000002'],
+    });
+
+    await leadImports.completeLeadImport(importId, finishedAt);
+
+    expect(await database.findLeadImport(importId)).toMatchObject({ status: 'COMPLETED', finishedAt });
+    expect(await database.countStoredRowsOf(importId)).toBe(0);
+  });
+
+  it('continuam guardadas quando a importação já tinha falhado e não pode ser concluída', async () => {
+    const maria = await database.addUser('Maria');
+    const importId = await database.addLeadImport({
+      requestedById: maria,
+      status: 'FAILED',
+      phonesToImport: ['+5511900000001', '+5511900000002'],
+    });
+
+    const completedImport = await leadImports.completeLeadImport(importId, finishedAt);
+
+    expect(completedImport).toBeNull();
+    expect(await database.findLeadImport(importId)).toMatchObject({ status: 'FAILED' });
+    expect(await database.countStoredRowsOf(importId)).toBe(2);
+  });
+
+  it('são apagadas quando uma importação que falhou expira', async () => {
+    const maria = await database.addUser('Maria');
+    const importId = await database.addLeadImport({
+      requestedById: maria,
+      status: 'FAILED',
+      phonesToImport: ['+5511900000001'],
+    });
+
+    await leadImports.expireLeadImport(importId);
+
+    expect(await database.findLeadImport(importId)).toMatchObject({ status: 'EXPIRED' });
+    expect(await database.countStoredRowsOf(importId)).toBe(0);
+  });
+
+  it('continuam guardadas se a importação ainda está em processamento, mesmo que peçam para expirar', async () => {
+    const maria = await database.addUser('Maria');
+    const importId = await database.addLeadImport({
+      requestedById: maria,
+      status: 'PROCESSING',
+      phonesToImport: ['+5511900000001'],
+    });
+
+    const expiredImport = await leadImports.expireLeadImport(importId);
+
+    expect(expiredImport).toBeNull();
+    expect(await database.countStoredRowsOf(importId)).toBe(1);
+  });
+});

@@ -1,5 +1,5 @@
-import type { PrismaClient } from '@prisma/client';
 import type { CreateSessionInput, SessionRecord } from '@/models/session.model';
+import type { DatabaseClient } from '@/repositories/database-client';
 
 export interface ISessionRepository {
   createSession(newSession: CreateSessionInput): Promise<{ id: string }>;
@@ -9,7 +9,7 @@ export interface ISessionRepository {
 }
 
 export class PrismaSessionRepository implements ISessionRepository {
-  constructor(private readonly db: PrismaClient) {}
+  constructor(private readonly db: DatabaseClient) {}
 
   async createSession(newSession: CreateSessionInput): Promise<{ id: string }> {
     return await this.db.session.create({ data: newSession, select: { id: true } });

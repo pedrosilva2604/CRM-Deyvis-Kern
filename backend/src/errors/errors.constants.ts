@@ -19,6 +19,18 @@ export const LEAD_ERRORS = {
   ASSIGNEE_NOT_AVAILABLE: 'Responsável não encontrado ou desativado',
 } as const;
 
+export const LEAD_IMPORT_ERRORS = {
+  NOT_FOUND: 'Importação não encontrada',
+  MISSING_FILE: 'Envie o arquivo CSV da planilha',
+  NO_ROWS_TO_IMPORT: 'Nenhuma linha da planilha pode ser importada',
+  NO_PIPELINE_TO_RECEIVE_LEADS: 'Nenhum funil configurado para receber os leads',
+  ALREADY_RUNNING: 'Você já tem uma importação em andamento. Aguarde ela terminar para enviar outra planilha.',
+} as const;
+
+export const NOTIFICATION_ERRORS = {
+  NOT_FOUND: 'Notificação não encontrada',
+} as const;
+
 export const PASSWORD_RESET_ERRORS = {
   INVALID_LINK: 'Link inválido ou expirado. Solicite uma nova redefinição de senha.',
 } as const;
@@ -27,7 +39,11 @@ export const REQUEST_ERRORS = {
   VALIDATION_FAILED: 'Dados inválidos',
   INVALID_JSON: 'JSON inválido',
   PAYLOAD_TOO_LARGE: 'Requisição muito grande',
+  UNSUPPORTED_CONTENT: 'Formato ou codificação do conteúdo não suportados',
+  INCOMPLETE_REQUEST: 'Requisição incompleta',
   RESOURCE_NOT_FOUND: 'Recurso não encontrado',
+  RESOURCE_ALREADY_EXISTS: 'Registro já existe',
   TOO_MANY_REQUESTS: 'Muitas solicitações. Tente novamente em alguns minutos.',
   INTERNAL: 'Erro interno do servidor',
+  SERVICE_UNAVAILABLE: 'Serviço temporariamente indisponível. Tente novamente em instantes.',
 } as const;
