@@ -8,6 +8,10 @@ export interface LeadImportProgressRequest {
   targetImportId: string;
 }
 
+export interface LeadImportRetryRequest {
+  targetImportId: string;
+}
+
 export interface LeadImportReceipt {
   importId: string;
 }

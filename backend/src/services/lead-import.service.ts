@@ -1,4 +1,4 @@
-import { Role } from '@prisma/client';
+import { LeadImportStatus, Role } from '@prisma/client';
 import { readLeadSpreadsheet, type LeadSpreadsheetContent, type LeadSpreadsheetRowToImport } from '@crm/shared';
 import { BadRequestError, ConflictError, NotFoundError } from '@/errors/app-errors';
 import { LEAD_IMPORT_ERRORS } from '@/errors/errors.constants';
@@ -8,6 +8,7 @@ import type {
   LeadImportProgress,
   LeadImportProgressRequest,
   LeadImportReceipt,
+  LeadImportRetryRequest,
   LeadImportRowData,
 } from '@/models/lead-import.model';
 import type { ILeadImportQueue } from '@/queues/lead-import.queue';
@@ -22,6 +23,7 @@ export interface LeadImportLimits {
 export interface ILeadImportService {
   requestLeadImport(csvText: string, loggedUserContext: LoggedUserContext): Promise<LeadImportReceipt>;
   getLeadImportProgress(request: LeadImportProgressRequest, loggedUserContext: LoggedUserContext): Promise<LeadImportProgress>;
+  retryLeadImport(request: LeadImportRetryRequest, loggedUserContext: LoggedUserContext): Promise<void>;
 }
 
 export class LeadImportService implements ILeadImportService {
@@ -54,17 +56,40 @@ export class LeadImportService implements ILeadImportService {
 
   async getLeadImportProgress(
     { targetImportId }: LeadImportProgressRequest,
-    { loggedUser }: LoggedUserContext,
+    loggedUserContext: LoggedUserContext,
   ): Promise<LeadImportProgress> {
+    return await this.findVisibleLeadImportOrFail(targetImportId, loggedUserContext);
+  }
+
+  async retryLeadImport({ targetImportId }: LeadImportRetryRequest, loggedUserContext: LoggedUserContext): Promise<void> {
+    const leadImport = await this.findVisibleLeadImportOrFail(targetImportId, loggedUserContext);
+    if (leadImport.status !== LeadImportStatus.FAILED) throw new ConflictError(LEAD_IMPORT_ERRORS.NOT_RETRYABLE);
+    const wasReopened = await this.leadImportRepository.reopenFailedLeadImport(targetImportId);
+    if (!wasReopened) throw new ConflictError(LEAD_IMPORT_ERRORS.NOT_RETRYABLE);
+
+    await this.audit.recordAuditLog(loggedUserContext, {
+      action: 'lead.import_retry_requested',
+      entity: 'LeadImport',
+      entityId: targetImportId,
+      details: { processedRows: leadImport.processedRows, rowsToImport: leadImport.rowsToImport },
+    });
+    await this.leaveForReconcilerIfQueueFails(targetImportId, () => this.leadImportQueue.requeueLeadImport(targetImportId));
+  }
+
+  private async findVisibleLeadImportOrFail(importId: string, { loggedUser }: LoggedUserContext): Promise<LeadImportProgress> {
     const onlyImportsRequestedBy = loggedUser.role === Role.ADMIN ? null : loggedUser.id;
-    const leadImportProgress = await this.leadImportRepository.findLeadImportProgress(targetImportId, onlyImportsRequestedBy);
+    const leadImportProgress = await this.leadImportRepository.findLeadImportProgress(importId, onlyImportsRequestedBy);
     if (!leadImportProgress) throw new NotFoundError(LEAD_IMPORT_ERRORS.NOT_FOUND);
     return leadImportProgress;
   }
 
   private async enqueueOrLeaveForReconciler(importId: string): Promise<void> {
+    await this.leaveForReconcilerIfQueueFails(importId, () => this.leadImportQueue.enqueueLeadImport(importId));
+  }
+
+  private async leaveForReconcilerIfQueueFails(importId: string, putInQueue: () => Promise<void>): Promise<void> {
     try {
-      await this.leadImportQueue.enqueueLeadImport(importId);
+      await putInQueue();
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       console.error(`Importação ${importId} gravada, mas fora da fila por enquanto; o conciliador vai enfileirá-la: ${reason}`);

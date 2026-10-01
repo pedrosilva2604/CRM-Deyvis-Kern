@@ -26,4 +26,10 @@ export class LeadImportController {
     );
     res.status(HttpStatus.OK).json(leadImportProgress);
   };
+
+  retryLeadImport = async (req: Request<LeadImportIdParams>, res: Response) => {
+    const loggedUserContext = this.requestContextExtractor.extractLoggedUserContext(req);
+    await this.leadImportService.retryLeadImport({ targetImportId: req.params.importId }, loggedUserContext);
+    res.status(HttpStatus.ACCEPTED).json({ message: LEAD_IMPORT_SUCCESS_MESSAGES.RETRY_REQUESTED });
+  };
 }

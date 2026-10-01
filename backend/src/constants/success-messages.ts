@@ -6,6 +6,7 @@ export const LEAD_SUCCESS_MESSAGES = {
 
 export const LEAD_IMPORT_SUCCESS_MESSAGES = {
   REQUESTED: 'Importação recebida',
+  RETRY_REQUESTED: 'Importação retomada',
 } as const;
 
 export const NOTIFICATION_SUCCESS_MESSAGES = {

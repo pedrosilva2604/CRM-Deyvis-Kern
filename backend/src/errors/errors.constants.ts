@@ -25,6 +25,7 @@ export const LEAD_IMPORT_ERRORS = {
   NO_ROWS_TO_IMPORT: 'Nenhuma linha da planilha pode ser importada',
   NO_PIPELINE_TO_RECEIVE_LEADS: 'Nenhum funil configurado para receber os leads',
   ALREADY_RUNNING: 'Você já tem uma importação em andamento. Aguarde ela terminar para enviar outra planilha.',
+  NOT_RETRYABLE: 'Só uma importação interrompida pode ser retomada',
 } as const;
 
 export const NOTIFICATION_ERRORS = {

@@ -21,6 +21,7 @@ export interface ILeadImportRepository {
   importChunk(chunk: LeadImportChunk): Promise<number>;
   completeLeadImport(importId: string, finishedAt: Date): Promise<FinishedLeadImport | null>;
   failLeadImport(importId: string, failureReason: string, finishedAt: Date): Promise<FinishedLeadImport | null>;
+  reopenFailedLeadImport(importId: string): Promise<boolean>;
   findStalePendingImportIds(createdBefore: Date): Promise<string[]>;
   findStaleProcessingImportIds(startedBefore: Date): Promise<string[]>;
   findFailedImportIdsFinishedBefore(finishedBefore: Date, onlyNotWarned: boolean): Promise<string[]>;
@@ -125,6 +126,20 @@ export class LeadImportRepository implements ILeadImportRepository {
       data: { status: LeadImportStatus.FAILED, failureReason, finishedAt },
     });
     return failure.count === 0 ? null : await this.findFinishedLeadImport(importId, finishedAt);
+  }
+
+  async reopenFailedLeadImport(importId: string): Promise<boolean> {
+    const reopening = await this.prisma.leadImport.updateMany({
+      where: { id: importId, status: LeadImportStatus.FAILED },
+      data: {
+        status: LeadImportStatus.PENDING,
+        failureReason: null,
+        startedAt: null,
+        finishedAt: null,
+        expiryWarningSentAt: null,
+      },
+    });
+    return reopening.count === 1;
   }
 
   async findStalePendingImportIds(createdBefore: Date): Promise<string[]> {

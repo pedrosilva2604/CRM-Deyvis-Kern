@@ -1,4 +1,6 @@
 import type { LeadImportStatus } from '@prisma/client';
+import { ConflictError } from '@/errors/app-errors';
+import { LEAD_IMPORT_ERRORS } from '@/errors/errors.constants';
 import { LeadImportChunkAlreadyProcessedError, type ILeadImportRepository } from '@/repositories/lead-import.repository';
 import type {
   CreateLeadImportData,
@@ -153,6 +155,20 @@ export class InMemoryLeadImportRepository implements ILeadImportRepository {
     storedImport.failureReason = failureReason;
     storedImport.finishedAt = finishedAt;
     return this.describeFinishedImport(storedImport);
+  }
+
+  async reopenFailedLeadImport(importId: string): Promise<boolean> {
+    const storedImport = this.find(importId);
+    if (storedImport.status !== 'FAILED') return false;
+    if (storedImport.requestedById !== null && (await this.hasRunningLeadImport(storedImport.requestedById))) {
+      throw new ConflictError(LEAD_IMPORT_ERRORS.ALREADY_RUNNING);
+    }
+    storedImport.status = 'PENDING';
+    storedImport.failureReason = null;
+    storedImport.startedAt = null;
+    storedImport.finishedAt = null;
+    storedImport.expiryWarningSentAt = null;
+    return true;
   }
 
   async findStalePendingImportIds(createdBefore: Date): Promise<string[]> {

@@ -3,6 +3,7 @@ import type { ILeadImportQueue, LeadImportJobState } from '@/queues/lead-import.
 export class InMemoryLeadImportQueue implements ILeadImportQueue {
   readonly enqueuedImportIds: string[] = [];
   readonly requeuedImportIds: string[] = [];
+  isRedisDown = false;
   private readonly jobStateByImportId = new Map<string, LeadImportJobState>();
 
   setJobState(importId: string, jobState: LeadImportJobState): void {
@@ -10,6 +11,7 @@ export class InMemoryLeadImportQueue implements ILeadImportQueue {
   }
 
   async enqueueLeadImport(importId: string): Promise<void> {
+    this.failWhenRedisIsDown();
     this.enqueuedImportIds.push(importId);
     this.jobStateByImportId.set(importId, 'scheduled');
   }
@@ -19,9 +21,14 @@ export class InMemoryLeadImportQueue implements ILeadImportQueue {
   }
 
   async requeueLeadImport(importId: string): Promise<void> {
+    this.failWhenRedisIsDown();
     this.requeuedImportIds.push(importId);
     this.jobStateByImportId.set(importId, 'scheduled');
   }
 
   async close(): Promise<void> {}
+
+  private failWhenRedisIsDown(): void {
+    if (this.isRedisDown) throw new Error('Redis fora do ar (simulado)');
+  }
 }

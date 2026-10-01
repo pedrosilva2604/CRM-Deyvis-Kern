@@ -57,6 +57,12 @@ export class LeadRoutes {
       this.validate.validateParams(leadImportIdParamsSchema),
       this.leadImports.getLeadImportProgress,
     );
+    this.router.post(
+      '/imports/:importId/retry',
+      this.rateLimit.leadImportLimiter,
+      this.validate.validateParams(leadImportIdParamsSchema),
+      this.leadImports.retryLeadImport,
+    );
   }
 
   private registerReadRoutes() {

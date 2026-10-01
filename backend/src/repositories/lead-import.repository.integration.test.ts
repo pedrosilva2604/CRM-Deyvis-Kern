@@ -116,6 +116,43 @@ describe('Uma importação em andamento por usuário', () => {
   });
 });
 
+describe('Retomar uma importação interrompida', () => {
+  it('volta para PENDING mantendo o progresso e as linhas guardadas', async () => {
+    const maria = await database.addUser('Maria');
+    const importId = await database.addLeadImport({
+      requestedById: maria,
+      status: 'FAILED',
+      phonesToImport: ['+5511900000001', '+5511900000002'],
+      processedRows: 1,
+    });
+
+    expect(await leadImports.reopenFailedLeadImport(importId)).toBe(true);
+
+    expect(await database.findLeadImport(importId)).toMatchObject({ status: 'PENDING', processedRows: 1, finishedAt: null });
+    expect(await database.countStoredRowsOf(importId)).toBe(2);
+  });
+
+  it('não reabre uma importação que não falhou', async () => {
+    const maria = await database.addUser('Maria');
+    const importId = await database.addLeadImport({ requestedById: maria, status: 'COMPLETED' });
+
+    expect(await leadImports.reopenFailedLeadImport(importId)).toBe(false);
+    expect(await database.findLeadImport(importId)).toMatchObject({ status: 'COMPLETED' });
+  });
+
+  it('o banco recusa se a pessoa já tem outra importação em andamento', async () => {
+    const maria = await database.addUser('Maria');
+    const failedImport = await database.addLeadImport({ requestedById: maria, status: 'FAILED' });
+    await database.addLeadImport({ requestedById: maria, status: 'PROCESSING' });
+
+    const reopening = leadImports.reopenFailedLeadImport(failedImport);
+
+    await expect(reopening).rejects.toBeInstanceOf(ConflictError);
+    await expect(reopening).rejects.toThrow(LEAD_IMPORT_ERRORS.ALREADY_RUNNING);
+    expect(await database.findLeadImport(failedImport)).toMatchObject({ status: 'FAILED' });
+  });
+});
+
 describe('Linhas guardadas da planilha', () => {
   it('são apagadas quando a importação é concluída', async () => {
     const maria = await database.addUser('Maria');
