@@ -1,5 +1,6 @@
 import { Loader2 } from 'lucide-react';
 import { Alert } from '@/components/ui/Alert';
+import { Button } from '@/components/ui/Button';
 import { useLeadImportProgress } from '@/hooks/useLeads';
 import { formatInteger } from '@/lib/formatters';
 import type { LeadImportProgress } from '@/types/lead';
@@ -28,10 +29,24 @@ function describeCompletedImport({ importedLeads, skippedExistingLeads }: LeadIm
   return `${importedDescription} ${formatInteger(skippedExistingLeads)} já existiam no CRM e foram ignorados.`;
 }
 
-export function LeadImportTracker({ importId }: LeadImportTrackerProps) {
-  const { data: leadImportProgress, isError } = useLeadImportProgress(importId);
+function ProgressCheckFailed({ onTryAgain, isTryingAgain }: { onTryAgain: () => void; isTryingAgain: boolean }) {
+  return (
+    <div className="space-y-3">
+      <Alert variant="error">
+        Não foi possível acompanhar a importação. Ela pode continuar rodando: a lista de leads se atualiza quando
+        terminar.
+      </Alert>
+      <Button variant="secondary" onClick={onTryAgain} disabled={isTryingAgain}>
+        {isTryingAgain ? 'Consultando...' : 'Tentar de novo'}
+      </Button>
+    </div>
+  );
+}
 
-  if (isError) return <Alert variant="error">Não foi possível consultar o andamento da importação.</Alert>;
+export function LeadImportTracker({ importId }: LeadImportTrackerProps) {
+  const { data: leadImportProgress, isError, isFetching, refetch } = useLeadImportProgress(importId);
+
+  if (isError) return <ProgressCheckFailed onTryAgain={() => void refetch()} isTryingAgain={isFetching} />;
   if (!leadImportProgress || leadImportProgress.status === 'PENDING') {
     return <RunningImport description="Na fila: a importação vai começar em instantes." />;
   }
