@@ -66,3 +66,7 @@ export function createDatabaseClient(databaseUrl: string) {
 }
 
 export type DatabaseClient = ReturnType<typeof createDatabaseClient>;
+
+type InteractiveTransactionWork = Extract<Parameters<DatabaseClient['$transaction']>[0], (transaction: never) => unknown>;
+
+export type DatabaseTransaction = Parameters<InteractiveTransactionWork>[0];

@@ -29,7 +29,7 @@ export interface IUserService {
 }
 
 export interface IUserPasswordUpdater {
-  replaceUserPassword(userId: string, password: string): Promise<void>;
+  replaceUserPassword(userId: string, password: string, resetTokenToConsume: string | null): Promise<boolean>;
 }
 
 export class UserService implements IUserService, IUserPasswordUpdater {
@@ -65,9 +65,10 @@ export class UserService implements IUserService, IUserPasswordUpdater {
     this.assertLoggedUserIsAdmin(loggedUserContext);
     const targetUser = await this.findExistingUserOrFail(targetUserId);
     if (this.isChangingEmail(targetUser, data)) await this.assertEmailIsAvailable(data.email);
-    if (this.isLosingAdminRole(targetUser, data)) await this.assertCanRemoveAdmin(targetUser, loggedUserContext);
+    if (this.isLosingAdminRole(targetUser, data)) this.assertIsNotSelf(targetUser, loggedUserContext);
 
-    const updated = await this.userRepository.updateUser(targetUserId, data);
+    const updated = await this.userRepository.updateUserKeepingAnActiveAdmin(targetUserId, data);
+    if (!updated) throw new BadRequestError(USER_ERRORS.LAST_ADMIN);
     await this.recordUserAuditLog(loggedUserContext, 'user.update', targetUserId, { ...data });
     return updated;
   }
@@ -87,10 +88,11 @@ export class UserService implements IUserService, IUserPasswordUpdater {
   ): Promise<RegisteredUserOutput> {
     this.assertLoggedUserIsAdmin(loggedUserContext);
     const targetUser = await this.findExistingUserOrFail(targetUserId);
-    await this.assertCanRemoveAdmin(targetUser, loggedUserContext);
+    this.assertIsNotSelf(targetUser, loggedUserContext);
 
-    const deactivated = await this.userRepository.deactivateUser(targetUserId);
-    await this.sessions.endAllUserSessions(targetUserId);
+    const deactivated = await this.userRepository.deactivateUserKeepingAnActiveAdmin(targetUserId);
+    if (!deactivated) throw new BadRequestError(USER_ERRORS.LAST_ADMIN);
+    this.sessions.notifyAllUserSessionsEnded(targetUserId);
     await this.recordUserAuditLog(loggedUserContext, 'user.deactivate', targetUserId, undefined);
     return deactivated;
   }
@@ -102,21 +104,24 @@ export class UserService implements IUserService, IUserPasswordUpdater {
     this.assertLoggedUserIsAdmin(loggedUserContext);
     await this.findExistingUserOrFail(targetUserId);
 
-    await this.replaceUserPassword(targetUserId, data.password);
+    await this.replaceUserPassword(targetUserId, data.password, null);
     await this.recordUserAuditLog(loggedUserContext, 'user.password_update', targetUserId, undefined);
   }
 
-  async replaceUserPassword(userId: string, password: string): Promise<void> {
-    await this.userRepository.updateUserPassword(userId, await this.hasher.hashPassword(password));
-    await this.sessions.endAllUserSessions(userId);
+  async replaceUserPassword(userId: string, password: string, resetTokenToConsume: string | null): Promise<boolean> {
+    const passwordHash = await this.hasher.hashPassword(password);
+    const wasReplaced = await this.userRepository.replaceUserPassword(userId, passwordHash, resetTokenToConsume);
+    if (wasReplaced) this.sessions.notifyAllUserSessionsEnded(userId);
+    return wasReplaced;
   }
 
   async deleteUser({ targetUserId }: DeleteUserRequest, loggedUserContext: LoggedUserContext): Promise<void> {
     this.assertLoggedUserIsAdmin(loggedUserContext);
     const targetUser = await this.findExistingUserOrFail(targetUserId);
-    await this.assertCanRemoveAdmin(targetUser, loggedUserContext);
+    this.assertIsNotSelf(targetUser, loggedUserContext);
 
-    await this.userRepository.deleteUser(targetUserId);
+    const wasDeleted = await this.userRepository.deleteUserKeepingAnActiveAdmin(targetUserId);
+    if (!wasDeleted) throw new BadRequestError(USER_ERRORS.LAST_ADMIN);
     await this.recordUserAuditLog(loggedUserContext, 'user.delete', targetUserId, {
       name: targetUser.name,
       email: targetUser.email,
@@ -144,14 +149,8 @@ export class UserService implements IUserService, IUserPasswordUpdater {
     if (existing) throw new ConflictError(USER_ERRORS.EMAIL_IN_USE);
   }
 
-  private async assertCanRemoveAdmin(targetUser: RegisteredUserOutput, { loggedUser }: LoggedUserContext): Promise<void> {
+  private assertIsNotSelf(targetUser: RegisteredUserOutput, { loggedUser }: LoggedUserContext): void {
     if (targetUser.id === loggedUser.id) throw new BadRequestError(USER_ERRORS.SELF_ACTION);
-    if (await this.isLastActiveAdmin(targetUser)) throw new BadRequestError(USER_ERRORS.LAST_ADMIN);
-  }
-
-  private async isLastActiveAdmin(targetUser: RegisteredUserOutput): Promise<boolean> {
-    if (targetUser.role !== Role.ADMIN || !targetUser.active) return false;
-    return (await this.userRepository.countActiveAdmins()) <= 1;
   }
 
   private isChangingEmail(

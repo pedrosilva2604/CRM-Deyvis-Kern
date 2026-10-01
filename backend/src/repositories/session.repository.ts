@@ -5,7 +5,6 @@ export interface ISessionRepository {
   createSession(newSession: CreateSessionInput): Promise<{ id: string }>;
   findSessionById(id: string): Promise<SessionRecord | null>;
   revokeSession(id: string): Promise<void>;
-  revokeAllUserSessions(userId: string): Promise<void>;
 }
 
 export class PrismaSessionRepository implements ISessionRepository {
@@ -30,9 +29,5 @@ export class PrismaSessionRepository implements ISessionRepository {
 
   async revokeSession(id: string): Promise<void> {
     await this.db.session.updateMany({ where: { id, revokedAt: null }, data: { revokedAt: new Date() } });
-  }
-
-  async revokeAllUserSessions(userId: string): Promise<void> {
-    await this.db.session.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
   }
 }
