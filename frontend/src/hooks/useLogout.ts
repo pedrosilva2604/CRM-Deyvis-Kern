@@ -1,9 +1,7 @@
 import { useState } from 'react';
 import axios from 'axios';
-import { useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { disconnectSocket } from '@/lib/socket';
-import { useAuth } from '@/stores/auth';
+import { endBrowserSession } from '@/lib/browserSession';
 
 const LOGOUT_FAILED_MESSAGE = 'Não foi possível sair. Verifique a conexão e tente novamente.';
 
@@ -12,25 +10,17 @@ function sessionAlreadyInvalid(err: unknown) {
 }
 
 export function useLogout() {
-  const clearSession = useAuth((s) => s.clearSession);
-  const queryClient = useQueryClient();
   const [loggingOut, setLoggingOut] = useState(false);
   const [error, setError] = useState('');
-
-  function finishLocally() {
-    disconnectSocket();
-    queryClient.clear();
-    clearSession();
-  }
 
   async function logout() {
     setError('');
     setLoggingOut(true);
     try {
       await api.post('/auth/logout');
-      finishLocally();
+      endBrowserSession();
     } catch (err) {
-      if (sessionAlreadyInvalid(err)) return finishLocally();
+      if (sessionAlreadyInvalid(err)) return endBrowserSession();
       setError(LOGOUT_FAILED_MESSAGE);
     } finally {
       setLoggingOut(false);

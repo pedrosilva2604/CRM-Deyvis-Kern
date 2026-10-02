@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import type { ErrorMiddleware } from '@/middlewares/error.middleware';
+import type { RequestIdMiddleware } from '@/middlewares/request-id.middleware';
 
 export interface AppConfig {
   corsOrigin: string;
@@ -18,12 +19,18 @@ export class App {
     private readonly config: AppConfig,
     private readonly routes: Router,
     private readonly errorMiddleware: ErrorMiddleware,
+    private readonly requestIdMiddleware: RequestIdMiddleware,
   ) {
+    this.identifyRequests();
     this.configureSecurity();
     this.configureParsers();
     this.configureLogging();
     this.registerRoutes();
     this.registerErrorHandler();
+  }
+
+  private identifyRequests() {
+    this.express.use(this.requestIdMiddleware.assignRequestId);
   }
 
   private configureSecurity() {

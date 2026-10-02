@@ -46,8 +46,7 @@ export class PasswordResetService implements IPasswordResetService {
 
   async resetPassword({ token, password }: ResetPasswordInput, requestOrigin: RequestOrigin): Promise<void> {
     const record = await this.findUsableResetToken(token);
-    await this.consumeResetToken(record);
-    await this.replacePasswordOfTokenOwner(record.userId, password);
+    await this.replacePasswordConsumingResetToken(record, password);
     await this.audit.recordAuditLog({ ...requestOrigin, userId: record.userId }, { action: 'auth.password_reset', entity: 'User', entityId: record.userId });
   }
 
@@ -65,18 +64,15 @@ export class PasswordResetService implements IPasswordResetService {
     return record.expiresAt.getTime() <= this.clock.now().getTime();
   }
 
-  private async consumeResetToken(record: PasswordResetTokenRecord): Promise<void> {
-    const consumed = await this.resetTokens.markResetTokenAsUsed(record.id);
-    if (!consumed) throw new BadRequestError(PASSWORD_RESET_ERRORS.INVALID_LINK);
-  }
-
-  private async replacePasswordOfTokenOwner(userId: string, password: string): Promise<void> {
+  private async replacePasswordConsumingResetToken(record: PasswordResetTokenRecord, password: string): Promise<void> {
+    let wasReplaced: boolean;
     try {
-      await this.passwordUpdater.replaceUserPassword(userId, password);
+      wasReplaced = await this.passwordUpdater.replaceUserPassword(record.userId, password, record.id);
     } catch (error) {
       if (error instanceof NotFoundError) throw new BadRequestError(PASSWORD_RESET_ERRORS.INVALID_LINK);
       throw error;
     }
+    if (!wasReplaced) throw new BadRequestError(PASSWORD_RESET_ERRORS.INVALID_LINK);
   }
 
   private async sendResetLink(user: Recipient, token: string): Promise<void> {

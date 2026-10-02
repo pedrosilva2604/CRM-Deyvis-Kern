@@ -1,5 +1,6 @@
 import { Worker, type Job } from 'bullmq';
 import type { Redis } from 'ioredis';
+import { logFailure } from '@/infra/technical-error';
 import type { LeadImportCounters } from '@/models/lead-import.model';
 import { LEAD_IMPORT_QUEUE_NAME, type LeadImportJobData } from '@/queues/lead-import.queue';
 import type {
@@ -42,11 +43,15 @@ export class LeadImportWorker {
   }
 
   private async handleFailedAttempt(job: Job<LeadImportJobData> | undefined, error: Error): Promise<void> {
+    logFailure(
+      { worker: 'lead-import', importId: job?.data.importId, attempt: job?.attemptsMade, maximumAttempts: job?.opts.attempts },
+      error,
+    );
     if (!job || job.attemptsMade < (job.opts.attempts ?? 1)) return;
     try {
       await this.leadImportProcessingService.markLeadImportAsFailed(job.data.importId, error.message);
     } catch (markingError) {
-      console.error(`Importação ${job.data.importId} falhou e não pôde ser marcada como FAILED: ${(markingError as Error).message}`);
+      logFailure({ worker: 'lead-import', importId: job.data.importId, step: 'mark-as-failed' }, markingError);
     }
   }
 }

@@ -19,11 +19,14 @@ type ImportStep =
   | { name: 'tracking'; importId: string };
 
 interface ImportLeadsDialogProps {
+  importIdToTrack?: string;
   onClose: () => void;
 }
 
-export function ImportLeadsDialog({ onClose }: ImportLeadsDialogProps) {
-  const [importStep, setImportStep] = useState<ImportStep>({ name: 'choosing', rejectionReason: null });
+export function ImportLeadsDialog({ importIdToTrack, onClose }: ImportLeadsDialogProps) {
+  const [importStep, setImportStep] = useState<ImportStep>(
+    importIdToTrack ? { name: 'tracking', importId: importIdToTrack } : { name: 'choosing', rejectionReason: null },
+  );
   const leadImportRequest = useRequestLeadImport();
 
   async function reviewChosenFile(event: ChangeEvent<HTMLInputElement>) {

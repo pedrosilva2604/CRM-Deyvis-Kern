@@ -10,7 +10,7 @@ import {
   type UserCredentials,
   type UserOutput,
 } from '@/models/user.model';
-import type { DatabaseClient } from '@/repositories/database-client';
+import type { DatabaseClient, DatabaseTransaction } from '@/repositories/database-client';
 
 export interface IUserRepository {
   createUser(data: CreateUserData): Promise<RegisteredUserOutput>;
@@ -18,15 +18,18 @@ export interface IUserRepository {
   findUserById(id: string): Promise<RegisteredUserOutput | null>;
   findUserByEmail(email: string): Promise<RegisteredUserOutput | null>;
   findUserCredentialsByEmail(email: string): Promise<UserCredentials | null>;
-  countActiveAdmins(): Promise<number>;
   findActiveUsersForAssignment(): Promise<LeadPersonOutput[]>;
   isActiveUser(id: string): Promise<boolean>;
-  updateUser(id: string, data: UpdateUserData): Promise<RegisteredUserOutput>;
+  updateUserKeepingAnActiveAdmin(id: string, data: UpdateUserData): Promise<RegisteredUserOutput | null>;
   updateUserTheme(id: string, theme: Theme): Promise<UserOutput>;
   activateUser(id: string): Promise<RegisteredUserOutput>;
-  deactivateUser(id: string): Promise<RegisteredUserOutput>;
-  updateUserPassword(id: string, passwordHash: string): Promise<void>;
-  deleteUser(id: string): Promise<void>;
+  deactivateUserKeepingAnActiveAdmin(id: string): Promise<RegisteredUserOutput | null>;
+  deleteUserKeepingAnActiveAdmin(id: string): Promise<boolean>;
+  replaceUserPassword(id: string, passwordHash: string, resetTokenToConsume: string | null): Promise<boolean>;
+}
+
+function isRemovingAdminRole(data: UpdateUserData): boolean {
+  return data.role !== undefined && data.role !== Role.ADMIN;
 }
 
 export class UserRepository implements IUserRepository {
@@ -57,10 +60,6 @@ export class UserRepository implements IUserRepository {
     return user ? toUserCredentials(user) : null;
   }
 
-  async countActiveAdmins(): Promise<number> {
-    return await this.prisma.user.count({ where: { role: Role.ADMIN, active: true } });
-  }
-
   async findActiveUsersForAssignment(): Promise<LeadPersonOutput[]> {
     return await this.prisma.user.findMany({
       where: { active: true },
@@ -73,9 +72,12 @@ export class UserRepository implements IUserRepository {
     return (await this.prisma.user.count({ where: { id, active: true } })) > 0;
   }
 
-  async updateUser(id: string, data: UpdateUserData): Promise<RegisteredUserOutput> {
-    const user = await this.prisma.user.update({ where: { id }, data });
-    return toRegisteredUserOutput(user);
+  async updateUserKeepingAnActiveAdmin(id: string, data: UpdateUserData): Promise<RegisteredUserOutput | null> {
+    return await this.prisma.$transaction(async (transaction) => {
+      if (isRemovingAdminRole(data) && (await this.wouldLeaveNoActiveAdmin(transaction, id))) return null;
+      const user = await transaction.user.update({ where: { id }, data });
+      return toRegisteredUserOutput(user);
+    });
   }
 
   async updateUserTheme(id: string, theme: Theme): Promise<UserOutput> {
@@ -88,16 +90,46 @@ export class UserRepository implements IUserRepository {
     return toRegisteredUserOutput(user);
   }
 
-  async deactivateUser(id: string): Promise<RegisteredUserOutput> {
-    const user = await this.prisma.user.update({ where: { id }, data: { active: false } });
-    return toRegisteredUserOutput(user);
+  async deactivateUserKeepingAnActiveAdmin(id: string): Promise<RegisteredUserOutput | null> {
+    return await this.prisma.$transaction(async (transaction) => {
+      if (await this.wouldLeaveNoActiveAdmin(transaction, id)) return null;
+      const user = await transaction.user.update({ where: { id }, data: { active: false } });
+      await this.revokeAllSessionsOf(transaction, id);
+      return toRegisteredUserOutput(user);
+    });
   }
 
-  async updateUserPassword(id: string, passwordHash: string): Promise<void> {
-    await this.prisma.user.update({ where: { id }, data: { passwordHash } });
+  async deleteUserKeepingAnActiveAdmin(id: string): Promise<boolean> {
+    return await this.prisma.$transaction(async (transaction) => {
+      if (await this.wouldLeaveNoActiveAdmin(transaction, id)) return false;
+      await transaction.user.delete({ where: { id } });
+      return true;
+    });
   }
 
-  async deleteUser(id: string): Promise<void> {
-    await this.prisma.user.delete({ where: { id } });
+  async replaceUserPassword(id: string, passwordHash: string, resetTokenToConsume: string | null): Promise<boolean> {
+    return await this.prisma.$transaction(async (transaction) => {
+      if (resetTokenToConsume !== null) {
+        const consumedResetToken = await transaction.passwordResetToken.updateMany({
+          where: { id: resetTokenToConsume, userId: id, usedAt: null },
+          data: { usedAt: new Date() },
+        });
+        if (consumedResetToken.count === 0) return false;
+      }
+      await transaction.user.update({ where: { id }, data: { passwordHash } });
+      await this.revokeAllSessionsOf(transaction, id);
+      return true;
+    });
+  }
+
+  private async wouldLeaveNoActiveAdmin(transaction: DatabaseTransaction, userId: string): Promise<boolean> {
+    const lockedActiveAdmins = await transaction.$queryRaw<{ id: string }[]>`
+      SELECT "id" FROM "User" WHERE "role" = 'ADMIN' AND "active" = true FOR UPDATE`;
+    const isTargetAnActiveAdmin = lockedActiveAdmins.some((activeAdmin) => activeAdmin.id === userId);
+    return isTargetAnActiveAdmin && lockedActiveAdmins.length <= 1;
+  }
+
+  private async revokeAllSessionsOf(transaction: DatabaseTransaction, userId: string): Promise<void> {
+    await transaction.session.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
   }
 }

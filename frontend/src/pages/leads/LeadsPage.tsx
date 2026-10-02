@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Upload, UsersRound } from 'lucide-react';
 import { Alert } from '@/components/ui/Alert';
 import { Button } from '@/components/ui/Button';
@@ -15,15 +15,31 @@ import { LeadsTable } from './LeadsTable';
 import { useLeadsPageUrlState } from './useLeadsPageUrlState';
 
 export function LeadsPage() {
-  const { filters, hasActiveFilters, updateFilters, clearFilters, selectedLeadId, openLeadDetails, closeLeadDetails } =
-    useLeadsPageUrlState();
+  const {
+    filters,
+    hasActiveFilters,
+    updateFilters,
+    clearFilters,
+    selectedLeadId,
+    openLeadDetails,
+    closeLeadDetails,
+    trackedImportId,
+    stopTrackingImport,
+  } = useLeadsPageUrlState();
   const { data: leadListPage, isPending, isError, isPlaceholderData, refetch } = useLeadList(filters);
   const { data: filterOptions } = useLeadFilterOptions();
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
 
   const leads = leadListPage?.leads ?? [];
-  const hasNoLeadsAtAll = !isPending && !isError && leads.length === 0 && !hasActiveFilters;
-  const hasNoMatchingLeads = !isPending && !isError && leads.length === 0 && hasActiveFilters;
+  const lastExistingPage = Math.max(1, Math.ceil((leadListPage?.totalMatchingLeads ?? 0) / LEADS_PAGE_SIZE));
+  const isPastLastPage = leadListPage !== undefined && !isPlaceholderData && filters.page > lastExistingPage;
+  const hasLoadedListPage = !isPending && !isError && !isPastLastPage;
+  const hasNoLeadsAtAll = hasLoadedListPage && leads.length === 0 && !hasActiveFilters;
+  const hasNoMatchingLeads = hasLoadedListPage && leads.length === 0 && hasActiveFilters;
+
+  useEffect(() => {
+    if (isPastLastPage) updateFilters({ page: lastExistingPage });
+  }, [isPastLastPage, lastExistingPage]);
 
   return (
     <>
@@ -107,6 +123,9 @@ export function LeadsPage() {
 
       {selectedLeadId && <LeadDetailsDrawer leadId={selectedLeadId} onClose={closeLeadDetails} />}
       {isImportDialogOpen && <ImportLeadsDialog onClose={() => setIsImportDialogOpen(false)} />}
+      {trackedImportId && !isImportDialogOpen && (
+        <ImportLeadsDialog key={trackedImportId} importIdToTrack={trackedImportId} onClose={stopTrackingImport} />
+      )}
     </>
   );
 }

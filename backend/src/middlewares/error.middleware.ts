@@ -3,6 +3,9 @@ import { ZodError } from 'zod';
 import { AppError, NotFoundError } from '@/errors/app-errors';
 import { REQUEST_ERRORS } from '@/errors/errors.constants';
 import { HttpStatus, sendErrorResponse, sendUnexpectedErrorResponse, type HttpStatusCode } from '@/infra/http-status';
+import { logFailure } from '@/infra/technical-error';
+
+const FIRST_SERVER_ERROR_STATUS = HttpStatus.INTERNAL_SERVER_ERROR;
 
 interface BodyParserError {
   type: string;
@@ -22,12 +25,31 @@ export class ErrorMiddleware {
     throw new NotFoundError(REQUEST_ERRORS.RESOURCE_NOT_FOUND);
   };
 
-  handleError = (err: unknown, _req: Request, res: Response, _next: NextFunction) => {
-    if (err instanceof AppError) return sendErrorResponse(res, err.statusCode, err);
+  handleError = (err: unknown, req: Request, res: Response, _next: NextFunction) => {
+    if (err instanceof AppError) return this.sendAppError(err, req, res);
     if (err instanceof ZodError) return this.sendValidationError(err, res);
     if (this.isBodyParserError(err)) return this.sendBodyParserError(err, res);
-    return sendUnexpectedErrorResponse(res, err);
+    this.logServerFailure(err, req);
+    return sendUnexpectedErrorResponse(res, req.requestId);
   };
+
+  private sendAppError(err: AppError, req: Request, res: Response) {
+    if (err.statusCode < FIRST_SERVER_ERROR_STATUS) return sendErrorResponse(res, err.statusCode, err);
+    this.logServerFailure(err, req);
+    return sendErrorResponse(res, err.statusCode, err, req.requestId);
+  }
+
+  private logServerFailure(err: unknown, req: Request) {
+    logFailure(
+      {
+        requestId: req.requestId,
+        method: req.method,
+        path: req.originalUrl.split('?')[0],
+        userId: req.user?.id ?? null,
+      },
+      err,
+    );
+  }
 
   private sendValidationError(err: ZodError, res: Response) {
     const { fieldErrors, formErrors } = err.flatten();

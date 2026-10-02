@@ -70,6 +70,8 @@ export class LeadImportProcessingService implements ILeadImportProcessingService
       processedRows: leadImport.processedRows,
       importedLeads: leadImport.importedLeads,
       skippedExistingLeads: leadImport.skippedExistingLeads,
+      restoredLeads: leadImport.restoredLeads,
+      skippedDeletedLeads: leadImport.skippedDeletedLeads,
     };
   }
 
@@ -82,12 +84,15 @@ export class LeadImportProcessingService implements ILeadImportProcessingService
     counters: LeadImportCounters,
     rows: LeadImportRowToProcess[],
   ): Promise<LeadImportCounters> {
-    const insertedLeads = await this.leadImportRepository.importChunk(this.buildChunk(leadImport, counters, rows));
+    const chunkResult = await this.leadImportRepository.importChunk(this.buildChunk(leadImport, counters, rows));
+    const skippedExistingLeads = rows.length - chunkResult.insertedLeads - chunkResult.restoredLeads - chunkResult.skippedDeletedLeads;
     return {
       rowsToImport: counters.rowsToImport,
       processedRows: counters.processedRows + rows.length,
-      importedLeads: counters.importedLeads + insertedLeads,
-      skippedExistingLeads: counters.skippedExistingLeads + rows.length - insertedLeads,
+      importedLeads: counters.importedLeads + chunkResult.insertedLeads,
+      skippedExistingLeads: counters.skippedExistingLeads + skippedExistingLeads,
+      restoredLeads: counters.restoredLeads + chunkResult.restoredLeads,
+      skippedDeletedLeads: counters.skippedDeletedLeads + chunkResult.skippedDeletedLeads,
     };
   }
 
@@ -100,6 +105,7 @@ export class LeadImportProcessingService implements ILeadImportProcessingService
     return {
       importId: leadImport.importId,
       processedRowsBefore: counters.processedRows,
+      restoresDeletedLeads: leadImport.restoresDeletedLeads,
       leadsToCreate: rowsInLockOrder.map((row) => ({ ...row, pipelineId: leadImport.pipelineId, stageId: leadImport.stageId })),
     };
   }

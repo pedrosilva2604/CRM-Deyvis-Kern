@@ -14,7 +14,7 @@ export interface ISessionService {
   startSession(userId: string, requestOrigin: RequestOrigin): Promise<IssuedSession>;
   validateSession(token: string): Promise<AuthUser>;
   endSession(sessionId: string): Promise<void>;
-  endAllUserSessions(userId: string): Promise<void>;
+  notifyAllUserSessionsEnded(userId: string): void;
 }
 
 export class SessionService implements ISessionService {
@@ -45,8 +45,7 @@ export class SessionService implements ISessionService {
     this.sessionTerminationNotifier.notifySessionEnded(sessionId);
   }
 
-  async endAllUserSessions(userId: string): Promise<void> {
-    await this.sessions.revokeAllUserSessions(userId);
+  notifyAllUserSessionsEnded(userId: string): void {
     this.sessionTerminationNotifier.notifyAllUserSessionsEnded(userId);
   }
 

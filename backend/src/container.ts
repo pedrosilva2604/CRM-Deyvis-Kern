@@ -22,6 +22,7 @@ import { SocketGateway } from '@/infra/socket';
 import { AuthMiddleware } from '@/middlewares/auth.middleware';
 import { CsvUploadMiddleware } from '@/middlewares/csv-upload.middleware';
 import { ErrorMiddleware } from '@/middlewares/error.middleware';
+import { RequestIdMiddleware } from '@/middlewares/request-id.middleware';
 import { RateLimitMiddleware } from '@/middlewares/rate-limit.middleware';
 import { ValidationMiddleware } from '@/middlewares/validation.middleware';
 import { BullMqLeadImportQueue } from '@/queues/lead-import.queue';
@@ -182,6 +183,7 @@ export const app = new App(
   },
   appRoutes.router,
   errorMiddleware,
+  new RequestIdMiddleware(),
 );
 export const socketGateway = new SocketGateway(sessionService, sessionCookie, sessionTerminationBroadcaster, env.CORS_ORIGIN);
 export const realtimeEventRelay = new RedisRealtimeEventRelay(createWorkerRedisClient(env.REDIS_URL), socketGateway);

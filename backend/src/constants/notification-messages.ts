@@ -4,13 +4,32 @@ function formatLeadCount(quantity: number): string {
   return `${integerFormatter.format(quantity)} ${quantity === 1 ? 'lead' : 'leads'}`;
 }
 
+export interface CompletedLeadImportSummary {
+  importedLeads: number;
+  skippedExistingLeads: number;
+  restoredLeads: number;
+  skippedDeletedLeads: number;
+}
+
+function describeCompletedLeadImport({
+  importedLeads,
+  skippedExistingLeads,
+  restoredLeads,
+  skippedDeletedLeads,
+}: CompletedLeadImportSummary): string {
+  const sentences = [`${formatLeadCount(importedLeads)} importados para o CRM.`];
+  if (restoredLeads > 0) sentences.push(`${formatLeadCount(restoredLeads)} que estavam excluídos foram restaurados.`);
+  if (skippedExistingLeads > 0) sentences.push(`${formatLeadCount(skippedExistingLeads)} já existiam no CRM e foram ignorados.`);
+  if (skippedDeletedLeads > 0) {
+    sentences.push(`${formatLeadCount(skippedDeletedLeads)} pertencem a leads excluídos: peça a um administrador para restaurá-los.`);
+  }
+  return sentences.join(' ');
+}
+
 export const LEAD_IMPORT_NOTIFICATION_MESSAGES = {
   COMPLETED: {
     title: 'Importação concluída',
-    message: (importedLeads: number, skippedExistingLeads: number) =>
-      skippedExistingLeads === 0
-        ? `${formatLeadCount(importedLeads)} importados para o CRM.`
-        : `${formatLeadCount(importedLeads)} importados; ${formatLeadCount(skippedExistingLeads)} já existiam no CRM e foram ignorados.`,
+    message: describeCompletedLeadImport,
   },
   FAILED: {
     title: 'Importação interrompida',

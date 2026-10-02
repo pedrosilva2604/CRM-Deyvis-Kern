@@ -4,7 +4,6 @@ import type { DatabaseClient } from '@/repositories/database-client';
 export interface IPasswordResetTokenRepository {
   replaceUserResetToken(userId: string, tokenHash: string, expiresAt: Date): Promise<void>;
   findResetTokenByHash(tokenHash: string): Promise<PasswordResetTokenRecord | null>;
-  markResetTokenAsUsed(id: string): Promise<boolean>;
 }
 
 export class PrismaPasswordResetTokenRepository implements IPasswordResetTokenRepository {
@@ -22,13 +21,5 @@ export class PrismaPasswordResetTokenRepository implements IPasswordResetTokenRe
       where: { tokenHash },
       select: { id: true, userId: true, expiresAt: true, usedAt: true, user: { select: { active: true } } },
     });
-  }
-
-  async markResetTokenAsUsed(id: string): Promise<boolean> {
-    const { count } = await this.db.passwordResetToken.updateMany({
-      where: { id, usedAt: null },
-      data: { usedAt: new Date() },
-    });
-    return count === 1;
   }
 }

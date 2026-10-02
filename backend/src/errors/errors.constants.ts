@@ -17,6 +17,13 @@ export const LEAD_ERRORS = {
   EMAIL_IN_USE: 'Já existe um lead com este e-mail',
   STAGE_NOT_FOUND: 'Etapa do funil não encontrada',
   ASSIGNEE_NOT_AVAILABLE: 'Responsável não encontrado ou desativado',
+  PHONE_HELD_BY_DELETED_LEAD: 'Este telefone pertence a um lead excluído. Você pode restaurá-lo.',
+  EMAIL_HELD_BY_DELETED_LEAD: 'Este e-mail pertence a um lead excluído. Você pode restaurá-lo.',
+  PHONE_IN_USE_ASK_ADMIN: 'Este telefone já está em uso. Fale com um administrador.',
+  EMAIL_IN_USE_ASK_ADMIN: 'Este e-mail já está em uso. Fale com um administrador.',
+  DELETED_LEAD_NOT_FOUND: 'Lead excluído não encontrado',
+  PHONE_OF_DELETED_LEAD_ON_EDIT: 'Este telefone pertence a um lead excluído e não pode ser usado em outro lead.',
+  EMAIL_OF_DELETED_LEAD_ON_EDIT: 'Este e-mail pertence a um lead excluído e não pode ser usado em outro lead.',
 } as const;
 
 export const LEAD_IMPORT_ERRORS = {
@@ -25,6 +32,8 @@ export const LEAD_IMPORT_ERRORS = {
   NO_ROWS_TO_IMPORT: 'Nenhuma linha da planilha pode ser importada',
   NO_PIPELINE_TO_RECEIVE_LEADS: 'Nenhum funil configurado para receber os leads',
   ALREADY_RUNNING: 'Você já tem uma importação em andamento. Aguarde ela terminar para enviar outra planilha.',
+  NOT_RETRYABLE: 'Só uma importação interrompida pode ser retomada',
+  REQUESTER_HAS_RUNNING_IMPORT: 'Quem enviou esta planilha já tem outra importação em andamento. Tente de novo quando ela terminar.',
 } as const;
 
 export const NOTIFICATION_ERRORS = {

@@ -1,10 +1,14 @@
 import { useEffect } from 'react';
+import axios from 'axios';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { leadsApi } from '@/api/leadsApi';
 import type { LeadImportProgress, LeadImportStatus, LeadListFilters } from '@/types/lead';
 
 const LEADS_QUERY_KEY = ['leads'] as const;
 const LEAD_IMPORT_PROGRESS_CHECK_EVERY_MS = 2_000;
+const SERVER_FAILURE_RETRIES = 3;
+const FIRST_RETRY_DELAY_MS = 2_000;
+const FIRST_SERVER_ERROR_STATUS = 500;
 const RUNNING_LEAD_IMPORT_STATUSES: LeadImportStatus[] = ['PENDING', 'PROCESSING'];
 const LEAD_INDICATORS_QUERY_KEY = [...LEADS_QUERY_KEY, 'indicators'] as const;
 const FILTER_OPTIONS_REUSED_FOR_MS = 5 * 60_000;
@@ -74,8 +78,21 @@ export function useRequestLeadImport() {
   });
 }
 
+export function useRetryLeadImport(importId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => leadsApi.retryLeadImport(importId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: [...LEADS_QUERY_KEY, 'imports', importId] }),
+  });
+}
+
 function isLeadImportRunning(leadImportProgress: LeadImportProgress | undefined) {
   return leadImportProgress === undefined || RUNNING_LEAD_IMPORT_STATUSES.includes(leadImportProgress.status);
+}
+
+function isServerOrNetworkFailure(error: unknown) {
+  if (!axios.isAxiosError(error)) return false;
+  return error.response === undefined || error.response.status >= FIRST_SERVER_ERROR_STATUS;
 }
 
 export function useLeadImportProgress(importId: string | null) {
@@ -84,7 +101,12 @@ export function useLeadImportProgress(importId: string | null) {
     queryKey: [...LEADS_QUERY_KEY, 'imports', importId],
     queryFn: () => leadsApi.getLeadImportProgress(importId as string),
     enabled: importId !== null,
-    refetchInterval: (query) => (isLeadImportRunning(query.state.data) ? LEAD_IMPORT_PROGRESS_CHECK_EVERY_MS : false),
+    retry: (failedAttempts, error) => isServerOrNetworkFailure(error) && failedAttempts < SERVER_FAILURE_RETRIES,
+    retryDelay: (retryNumber) => FIRST_RETRY_DELAY_MS * 2 ** retryNumber,
+    refetchInterval: (query) => {
+      if (query.state.status === 'error') return false;
+      return isLeadImportRunning(query.state.data) ? LEAD_IMPORT_PROGRESS_CHECK_EVERY_MS : false;
+    },
   });
 
   const hasFinishedImporting = leadImportProgressQuery.data?.status === 'COMPLETED';

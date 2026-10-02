@@ -14,6 +14,7 @@ const URL_PARAM_BY_FILTER: Record<keyof LeadListFilters, string> = {
 };
 
 const SELECTED_LEAD_URL_PARAM = 'lead';
+const TRACKED_IMPORT_URL_PARAM = 'importacao';
 
 function isLeadContactStatus(value: string): value is LeadContactStatus {
   return value in CONTACT_STATUS_LABELS;
@@ -90,5 +91,25 @@ export function useLeadsPageUrlState() {
     });
   }
 
-  return { filters, hasActiveFilters, updateFilters, clearFilters, selectedLeadId, openLeadDetails, closeLeadDetails };
+  const trackedImportId = searchParams.get(TRACKED_IMPORT_URL_PARAM);
+
+  function stopTrackingImport() {
+    setSearchParams((currentParams) => {
+      const nextParams = new URLSearchParams(currentParams);
+      nextParams.delete(TRACKED_IMPORT_URL_PARAM);
+      return nextParams;
+    });
+  }
+
+  return {
+    filters,
+    hasActiveFilters,
+    updateFilters,
+    clearFilters,
+    selectedLeadId,
+    openLeadDetails,
+    closeLeadDetails,
+    trackedImportId,
+    stopTrackingImport,
+  };
 }

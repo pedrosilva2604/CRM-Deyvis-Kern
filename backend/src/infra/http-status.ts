@@ -21,15 +21,14 @@ export const HttpStatus = {
 
 export type HttpStatusCode = (typeof HttpStatus)[keyof typeof HttpStatus];
 
-export function sendErrorResponse(res: Response, httpStatus: HttpStatusCode, error: AppError) {
-  res.status(httpStatus).json({ error: error.message });
+export function sendErrorResponse(res: Response, httpStatus: HttpStatusCode, error: AppError, requestId?: string) {
+  res.status(httpStatus).json({ error: error.message, ...error.extraResponseFields, ...(requestId && { requestId }) });
 }
 
 export function sendSuccessMessage(res: Response, httpStatus: HttpStatusCode, message: string) {
   res.status(httpStatus).json({ message });
 }
 
-export function sendUnexpectedErrorResponse(res: Response, unexpectedError: unknown) {
-  console.error(unexpectedError instanceof Error ? unexpectedError.stack : unexpectedError);
-  res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({ error: REQUEST_ERRORS.INTERNAL });
+export function sendUnexpectedErrorResponse(res: Response, requestId?: string) {
+  res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({ error: REQUEST_ERRORS.INTERNAL, ...(requestId && { requestId }) });
 }

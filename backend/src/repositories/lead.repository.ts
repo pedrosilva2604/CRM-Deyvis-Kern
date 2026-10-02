@@ -5,6 +5,8 @@ import {
   toLeadOutput,
   UNASSIGNED_LEADS_FILTER,
   type CreateLeadData,
+  type LeadHoldingContact,
+  type LeadContact,
   type LeadListPage,
   type LeadListQuery,
   type LeadOutput,
@@ -22,6 +24,8 @@ export interface ILeadRepository {
   createLead(newLead: CreateLeadData): Promise<LeadOutput>;
   updateLead(leadId: string, leadChanges: UpdateLeadData): Promise<void>;
   softDeleteLead(leadId: string, deletedAt: Date): Promise<void>;
+  findLeadHoldingContact(contact: LeadContact, ignoredLeadId: string | null): Promise<LeadHoldingContact | null>;
+  restoreDeletedLead(leadId: string): Promise<boolean>;
 }
 
 function buildSearchCondition(search: LeadSearch): Prisma.Sql {
@@ -97,6 +101,36 @@ export class LeadRepository implements ILeadRepository {
 
   async softDeleteLead(leadId: string, deletedAt: Date): Promise<void> {
     await this.prisma.lead.update({ where: { id: leadId }, data: { deletedAt } });
+  }
+
+  async findLeadHoldingContact({ phone, email }: LeadContact, ignoredLeadId: string | null): Promise<LeadHoldingContact | null> {
+    const contactMatches: Prisma.LeadWhereInput[] = [];
+    if (phone) contactMatches.push({ phone });
+    if (email) contactMatches.push({ email });
+    if (contactMatches.length === 0) return null;
+
+    const leadsHoldingContact = await this.prisma.lead.findMany({
+      where: { OR: contactMatches, ...(ignoredLeadId !== null && { id: { not: ignoredLeadId } }) },
+      select: { id: true, phone: true, deletedAt: true },
+    });
+    const holder =
+      leadsHoldingContact.find((lead) => lead.deletedAt === null) ??
+      leadsHoldingContact.find((lead) => lead.phone === phone) ??
+      leadsHoldingContact[0];
+    if (!holder) return null;
+    return {
+      leadId: holder.id,
+      heldContact: holder.phone === phone ? 'phone' : 'email',
+      isDeleted: holder.deletedAt !== null,
+    };
+  }
+
+  async restoreDeletedLead(leadId: string): Promise<boolean> {
+    const restoration = await this.prisma.lead.updateMany({
+      where: { id: leadId, deletedAt: { not: null } },
+      data: { deletedAt: null },
+    });
+    return restoration.count === 1;
   }
 
   private async findPageLeadIds(listCondition: Prisma.Sql, listQuery: LeadListQuery): Promise<string[]> {

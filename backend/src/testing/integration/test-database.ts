@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { LeadImportStatus } from '@prisma/client';
+import type { LeadImportStatus, Role } from '@prisma/client';
 import { inject } from 'vitest';
 import { createDatabaseClient, type DatabaseClient } from '@/repositories/database-client';
 
@@ -22,7 +22,18 @@ export interface LeadImportToAdd {
   processedRows?: number;
 }
 
+export interface UserToAdd {
+  role?: Role;
+  active?: boolean;
+}
+
+export const ORIGINAL_PASSWORD_HASH = 'hash-da-senha-original';
 const ENTERED_ON = new Date('2026-09-30T00:00:00.000Z');
+const ONE_HOUR_MS = 60 * 60 * 1000;
+
+function oneHourFromNow(): Date {
+  return new Date(Date.now() + ONE_HOUR_MS);
+}
 
 export class TestDatabase {
   readonly client: DatabaseClient = createDatabaseClient(inject('testDatabaseUrl'));
@@ -48,12 +59,41 @@ export class TestDatabase {
     this.currentFunnel = { pipelineId: pipeline.id, stageId: pipeline.stages[0]!.id };
   }
 
-  async addUser(name: string): Promise<string> {
+  async addUser(name: string, { role = 'AGENT', active = true }: UserToAdd = {}): Promise<string> {
     const user = await this.client.user.create({
-      data: { name, email: `${randomUUID()}@teste.local`, passwordHash: 'sem-senha-nos-testes' },
+      data: { name, role, active, email: `${randomUUID()}@teste.local`, passwordHash: ORIGINAL_PASSWORD_HASH },
       select: { id: true },
     });
     return user.id;
+  }
+
+  async addOpenSession(userId: string): Promise<void> {
+    await this.client.session.create({ data: { userId, expiresAt: oneHourFromNow() } });
+  }
+
+  async addResetToken(userId: string): Promise<string> {
+    const resetToken = await this.client.passwordResetToken.create({
+      data: { userId, tokenHash: randomUUID(), expiresAt: oneHourFromNow() },
+      select: { id: true },
+    });
+    return resetToken.id;
+  }
+
+  async findUser(userId: string) {
+    return await this.client.user.findUniqueOrThrow({ where: { id: userId } });
+  }
+
+  async countOpenSessionsOf(userId: string): Promise<number> {
+    return await this.client.session.count({ where: { userId, revokedAt: null } });
+  }
+
+  async isResetTokenStillUsable(resetTokenId: string): Promise<boolean> {
+    const resetToken = await this.client.passwordResetToken.findUniqueOrThrow({ where: { id: resetTokenId } });
+    return resetToken.usedAt === null;
+  }
+
+  async countActiveAdmins(): Promise<number> {
+    return await this.client.user.count({ where: { role: 'ADMIN', active: true } });
   }
 
   async addLead({ name, phone, email, deleted = false }: LeadToAdd): Promise<string> {
@@ -104,6 +144,10 @@ export class TestDatabase {
 
   async countStoredRowsOf(importId: string): Promise<number> {
     return await this.client.leadImportRow.count({ where: { leadImportId: importId } });
+  }
+
+  async findLeadByPhone(phone: string) {
+    return await this.client.lead.findUniqueOrThrow({ where: { phone } });
   }
 
   async findPhonesOfAllLeads(): Promise<string[]> {

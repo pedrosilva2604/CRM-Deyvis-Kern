@@ -57,6 +57,12 @@ export class LeadRoutes {
       this.validate.validateParams(leadImportIdParamsSchema),
       this.leadImports.getLeadImportProgress,
     );
+    this.router.post(
+      '/imports/:importId/retry',
+      this.rateLimit.leadImportLimiter,
+      this.validate.validateParams(leadImportIdParamsSchema),
+      this.leadImports.retryLeadImport,
+    );
   }
 
   private registerReadRoutes() {
@@ -78,6 +84,12 @@ export class LeadRoutes {
       this.authMiddleware.requireRole('ADMIN'),
       this.validate.validateParams(leadIdParamsSchema),
       this.leads.deleteLead,
+    );
+    this.router.patch(
+      '/:leadId/restore',
+      this.authMiddleware.requireRole('ADMIN'),
+      this.validate.validateParams(leadIdParamsSchema),
+      this.leads.restoreLead,
     );
   }
 }

@@ -315,8 +315,11 @@ export function importLeadSpreadsheet(csvText: string, maximumRows: number): Lea
     invalidRows: content.invalidRows.length,
     duplicateRowsInFile: content.duplicateRows.length,
     rowsToImport: content.rowsToImport.length,
+    processedRows: content.rowsToImport.length,
     importedLeads: newLeads.length,
     skippedExistingLeads: content.rowsToImport.length - newLeads.length,
+    restoredLeads: 0,
+    skippedDeletedLeads: 0,
     createdAt: now,
     finishedAt: now,
   });
