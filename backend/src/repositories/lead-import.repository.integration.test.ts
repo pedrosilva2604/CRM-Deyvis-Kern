@@ -124,7 +124,7 @@ describe('Telefones de leads excluídos na importação', () => {
 });
 
 describe('Lead excluído reconhecido pelo e-mail na importação', () => {
-  it('importação de ADMIN restaura o lead excluído que tem o e-mail da linha, mesmo com telefone novo', async () => {
+  it('importação de ADMIN restaura o João pelo e-mail, e o telefone novo da planilha passa a ser o dele', async () => {
     const ana = await database.addUser('Ana', { role: 'ADMIN' });
     await database.addLead({ name: 'João excluído', phone: '+5511900000001', email: 'joao@empresa.com', deleted: true });
     const importId = await database.addLeadImport({ requestedById: ana, status: 'PROCESSING' });
@@ -134,7 +134,27 @@ describe('Lead excluído reconhecido pelo e-mail na importação', () => {
     );
 
     expect(chunkResult).toEqual({ insertedLeads: 0, restoredLeads: 1, skippedDeletedLeads: 0 });
-    expect(await database.findLeadByPhone('+5511900000001')).toMatchObject({ name: 'João excluído', deletedAt: null });
+    expect(await database.findLeadByPhone('+5511900000099')).toMatchObject({ name: 'João excluído', deletedAt: null });
+  });
+
+  it('duas linhas do mesmo João contam um restaurado e um "já existia"', async () => {
+    const ana = await database.addUser('Ana', { role: 'ADMIN' });
+    await database.addLead({ name: 'João excluído', phone: '+5511900000001', email: 'joao@empresa.com', deleted: true });
+    const importId = await database.addLeadImport({ requestedById: ana, status: 'PROCESSING' });
+
+    const chunkResult = await leadImports.importChunk(
+      chunkWithRows(
+        importId,
+        [
+          { phone: '+5511900000001', email: 'outro-email@empresa.com' },
+          { phone: '+5511900000099', email: 'joao@empresa.com' },
+        ],
+        { importedBy: 'admin' },
+      ),
+    );
+
+    expect(chunkResult).toEqual({ insertedLeads: 0, restoredLeads: 1, skippedDeletedLeads: 0 });
+    expect(await database.findLeadImport(importId)).toMatchObject({ restoredLeads: 1, skippedExistingLeads: 1 });
   });
 
   it('importação de vendedor conta a linha como "pertence a lead excluído", e não como "já existia"', async () => {
