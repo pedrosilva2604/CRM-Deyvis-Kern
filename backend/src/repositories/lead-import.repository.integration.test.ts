@@ -24,7 +24,7 @@ const DISPUTES_TO_CATCH_A_DEADLOCK = 15;
 
 function chunkWithRows(
   importId: string,
-  rows: { phone: string; email: string }[],
+  rows: { phone: string; email: string | null }[],
   { importedBy }: { importedBy: 'admin' | 'seller' },
 ): LeadImportChunk {
   return {
@@ -135,6 +135,19 @@ describe('Lead excluído reconhecido pelo e-mail na importação', () => {
 
     expect(chunkResult).toEqual({ insertedLeads: 0, restoredLeads: 1, skippedDeletedLeads: 0 });
     expect(await database.findLeadByPhone('+5511900000099')).toMatchObject({ name: 'João excluído', deletedAt: null });
+  });
+
+  it.each([
+    ['primeiro a linha com o telefone atual', [{ phone: '+5511900000001', email: null }, { phone: '+5511900000099', email: 'joao@empresa.com' }]],
+    ['primeiro a linha com o telefone novo', [{ phone: '+5511900000099', email: 'joao@empresa.com' }, { phone: '+5511900000001', email: null }]],
+  ])('se alguma linha confirma o telefone atual do João, ele continua com esse telefone (%s)', async (_order, rows) => {
+    const ana = await database.addUser('Ana', { role: 'ADMIN' });
+    await database.addLead({ name: 'João excluído', phone: '+5511900000001', email: 'joao@empresa.com', deleted: true });
+    const importId = await database.addLeadImport({ requestedById: ana, status: 'PROCESSING' });
+
+    await leadImports.importChunk(chunkWithRows(importId, rows, { importedBy: 'admin' }));
+
+    expect(await database.findLeadByPhone('+5511900000001')).toMatchObject({ name: 'João excluído', deletedAt: null });
   });
 
   it('duas linhas do mesmo João contam um restaurado e um "já existia"', async () => {

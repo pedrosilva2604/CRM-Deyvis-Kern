@@ -43,6 +43,7 @@ interface DeletedLeadContactRecord extends LeadContactRecord {
 
 interface DeletedLeadOfRow {
   deletedLeadId: string;
+  currentPhoneConfirmed: boolean;
   newPhone: { phone: string; phoneCountry: string | null } | null;
 }
 
@@ -253,10 +254,14 @@ export class LeadImportRepository implements ILeadImportRepository {
         deletedLeads.find((candidate) => candidate.phone === row.phone) ??
         deletedLeads.find((candidate) => row.email !== null && candidate.email === row.email);
       if (!deletedLead) continue;
+      const alreadyFound = deletedLeadById.get(deletedLead.id);
+      const currentPhoneConfirmed = (alreadyFound?.currentPhoneConfirmed ?? false) || row.phone === deletedLead.phone;
       const bringsNewFreePhone = row.phone !== deletedLead.phone && !phonesInUse.has(row.phone);
+      const newPhoneOfRow = bringsNewFreePhone ? { phone: row.phone, phoneCountry: row.phoneCountry } : null;
       deletedLeadById.set(deletedLead.id, {
         deletedLeadId: deletedLead.id,
-        newPhone: bringsNewFreePhone ? { phone: row.phone, phoneCountry: row.phoneCountry } : null,
+        currentPhoneConfirmed,
+        newPhone: currentPhoneConfirmed ? null : (newPhoneOfRow ?? alreadyFound?.newPhone ?? null),
       });
     }
     return [...deletedLeadById.values()];
