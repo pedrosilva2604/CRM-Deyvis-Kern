@@ -1,11 +1,17 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { NotFoundError } from '@/errors/app-errors';
 import { TestDatabase } from '@/testing/integration/test-database';
+import { CARD_POSITION_GAP, PipelineCardRepository } from './pipeline-card.repository';
 import { PipelineRepository } from './pipeline.repository';
 import { UserRepository } from './user.repository';
 
 const database = new TestDatabase();
 const pipelines = new PipelineRepository(database.client);
+const cards = new PipelineCardRepository(database.client);
 const users = new UserRepository(database.client);
+const DISPUTES_TO_CATCH_A_RACE = 20;
+const CARDS_ALREADY_IN_FUNNEL = 10;
+const SLOW_DISPUTE_TIMEOUT_MS = 120_000;
 
 beforeEach(async () => {
   await database.prepareEmptyDatabase();
@@ -91,6 +97,34 @@ describe('Excluir uma etapa', () => {
 });
 
 describe('Excluir um funil', () => {
+  it('excluir o funil enquanto alguém adiciona cartão nele sempre exclui; o cartão entra antes ou recebe 404 (em 20 disputas)', async () => {
+    const unexpectedFailures: string[] = [];
+
+    for (let dispute = 1; dispute <= DISPUTES_TO_CATCH_A_RACE; dispute += 1) {
+      await database.prepareEmptyDatabase();
+      const maria = await database.addUser('Maria');
+      const funnel = await database.addPipeline(maria, ['Novo lead']);
+      const stageId = funnel.stageIdByName['Novo lead']!;
+      for (let cardIndex = 0; cardIndex < CARDS_ALREADY_IN_FUNNEL; cardIndex += 1) {
+        const leadId = await database.addLead({ name: `Lead ${cardIndex}`, phone: `+551190000${String(cardIndex).padStart(4, '0')}` });
+        await database.addCard(funnel.pipelineId, stageId, leadId, CARD_POSITION_GAP * (cardIndex + 1));
+      }
+      const leadArriving = await database.addLead({ name: 'Chegando', phone: '+5511999999999' });
+
+      const [deletion, addition] = await Promise.allSettled([
+        pipelines.deletePipeline(funnel.pipelineId),
+        cards.addCardOnTop({ pipelineId: funnel.pipelineId, stageId, leadId: leadArriving, addedById: maria }),
+      ]);
+
+      if (deletion.status === 'rejected') unexpectedFailures.push(`exclusão: ${String(deletion.reason)}`);
+      if (addition.status === 'rejected' && !(addition.reason instanceof NotFoundError)) {
+        unexpectedFailures.push(`cartão: ${String(addition.reason)}`);
+      }
+    }
+
+    expect(unexpectedFailures).toEqual([]);
+  }, SLOW_DISPUTE_TIMEOUT_MS);
+
   it('a importação que mirava o funil continua no histórico, só sem destino', async () => {
     const maria = await database.addUser('Maria');
     const importId = await database.addLeadImport({ requestedById: maria, status: 'PROCESSING', intoTestFunnel: true });

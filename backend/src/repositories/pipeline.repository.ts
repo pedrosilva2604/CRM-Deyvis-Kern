@@ -115,6 +115,7 @@ export class PipelineRepository implements IPipelineRepository {
 
   async deletePipeline(pipelineId: string): Promise<void> {
     await this.prisma.$transaction(async (transaction) => {
+      await lockStagesForCardPlacement(transaction, await this.findStageIdsInside(transaction, pipelineId));
       await transaction.pipelineCard.deleteMany({ where: { pipelineId } });
       await transaction.pipeline.delete({ where: { id: pipelineId } });
     });
@@ -165,6 +166,11 @@ export class PipelineRepository implements IPipelineRepository {
       await this.appendCardsToStage(transaction, stageId, receivingStageId);
       await transaction.stage.delete({ where: { id: stageId } });
     });
+  }
+
+  private async findStageIdsInside(transaction: DatabaseTransaction, pipelineId: string): Promise<string[]> {
+    const stages = await transaction.stage.findMany({ where: { pipelineId }, select: { id: true } });
+    return stages.map(({ id }) => id);
   }
 
   private async appendCardsToStage(transaction: DatabaseTransaction, fromStageId: string, toStageId: string): Promise<void> {
