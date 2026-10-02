@@ -34,12 +34,13 @@ export interface IPipelineRepository {
   findStage(stageId: string): Promise<StageRecord | null>;
   findStageIds(pipelineId: string): Promise<string[]>;
   createStage(pipelineId: string, stage: StageInput): Promise<StageCreationOutcome>;
-  updateStage(stageId: string, stageChanges: UpdateStageInput): Promise<void>;
+  updateStage(stageId: string, stageChanges: UpdateStageInput): Promise<StageUpdateOutcome>;
   reorderStages(pipelineId: string, orderedStageIds: string[]): Promise<StageReorderOutcome>;
   deleteStageMovingCards(pipelineId: string, stageId: string, receivingStageId: string): Promise<StageDeletionOutcome>;
 }
 
 export type StageCreationOutcome = 'created' | 'pipelineNotFound' | 'tooManyStages';
+export type StageUpdateOutcome = 'updated' | 'stageNotFound' | 'cardsWithoutWonValue';
 export type StageReorderOutcome = 'reordered' | 'pipelineNotFound' | 'stageOrderInvalid';
 export type StageDeletionOutcome = 'deleted' | 'pipelineNotFound' | 'stageNotFound' | 'lastStage' | 'cardsWithoutWonValue';
 
@@ -175,8 +176,27 @@ export class PipelineRepository implements IPipelineRepository {
     });
   }
 
-  async updateStage(stageId: string, stageChanges: UpdateStageInput): Promise<void> {
-    await this.prisma.stage.update({ where: { id: stageId }, data: stageChanges });
+  async updateStage(stageId: string, stageChanges: UpdateStageInput): Promise<StageUpdateOutcome> {
+    return await this.prisma.$transaction(async (transaction) => {
+      const lockedStageIds = await lockStagesForCardPlacement(transaction, [stageId]);
+      if (lockedStageIds.length === 0) return 'stageNotFound';
+      const currentKind = await transaction.stage.findUniqueOrThrow({ where: { id: stageId }, select: { id: true, isWon: true, isLost: true } });
+      const changedKind = {
+        id: stageId,
+        isWon: stageChanges.isWon ?? currentKind.isWon,
+        isLost: stageChanges.isLost ?? currentKind.isLost,
+      };
+      const becomesWon = changedKind.isWon && !currentKind.isWon;
+      if (becomesWon && (await this.hasCardsWithoutWonValue(transaction, stageId))) return 'cardsWithoutWonValue';
+
+      await transaction.stage.update({ where: { id: stageId }, data: stageChanges });
+      if (changedKind.isWon !== currentKind.isWon || changedKind.isLost !== currentKind.isLost) {
+        await transaction.$executeRaw`
+          UPDATE "PipelineCard" SET "updatedAt" = now()${this.closingChangesFor(currentKind, changedKind)}
+          WHERE "stageId" = ${stageId}::uuid`;
+      }
+      return 'updated';
+    });
   }
 
   async reorderStages(pipelineId: string, orderedStageIds: string[]): Promise<StageReorderOutcome> {

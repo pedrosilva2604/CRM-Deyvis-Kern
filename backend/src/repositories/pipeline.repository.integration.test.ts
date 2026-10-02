@@ -136,6 +136,34 @@ describe('Excluir uma etapa ajusta o fechamento dos cartões à etapa que recebe
     expect(card).toMatchObject({ closingNote: 'Pagou à vista', closedAt: closedOn });
   });
 
+  it('desmarcar uma etapa de Ganho tira dos cartões a cara de vendido', async () => {
+    expect(await pipelines.updateStage(funnel.stageIdByName['Ganho']!, { isWon: false })).toBe('updated');
+
+    expect(await database.findCard(wonCard)).toMatchObject({ wonValue: null, closingNote: null, closedAt: null });
+  });
+
+  it('trocar uma etapa de Ganho para Perdido tira o valor e mantém a anotação', async () => {
+    await pipelines.updateStage(funnel.stageIdByName['Ganho']!, { isWon: false, isLost: true });
+
+    expect(await database.findCard(wonCard)).toMatchObject({ wonValue: null, closingNote: 'Pagou à vista' });
+  });
+
+  it('não marca como Ganho uma etapa com cartão sem valor de venda, e não muda nada', async () => {
+    const lead = await database.addLead({ name: 'Negociando', phone: '+5511900000002' });
+    await database.addCard(funnel.pipelineId, funnel.stageIdByName['Proposta']!, lead, 1024);
+
+    expect(await pipelines.updateStage(funnel.stageIdByName['Proposta']!, { isWon: true, isLost: false })).toBe('cardsWithoutWonValue');
+    expect(await database.client.stage.findUniqueOrThrow({ where: { id: funnel.stageIdByName['Proposta']! } })).toMatchObject({ isWon: false });
+  });
+
+  it('renomear uma etapa de Ganho não mexe nos cartões', async () => {
+    await pipelines.updateStage(funnel.stageIdByName['Ganho']!, { name: 'Vendido' });
+
+    const card = await database.findCard(wonCard);
+    expect(card.wonValue?.toFixed(2)).toBe('1500.00');
+    expect(card).toMatchObject({ closingNote: 'Pagou à vista', closedAt: closedOn });
+  });
+
   it('não leva para Ganho cartão sem valor de venda, e não muda nada', async () => {
     const lead = await database.addLead({ name: 'Negociando', phone: '+5511900000002' });
     const openCard = await database.addCard(funnel.pipelineId, funnel.stageIdByName['Proposta']!, lead, 1024);

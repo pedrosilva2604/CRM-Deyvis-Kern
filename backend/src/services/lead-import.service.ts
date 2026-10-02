@@ -80,6 +80,7 @@ export class LeadImportService implements ILeadImportService {
     if (!access) throw new NotFoundError(PIPELINE_ERRORS.NOT_FOUND);
     const stage = await this.pipelineRepository.findStage(stageId);
     if (!stage || stage.pipelineId !== pipelineId) throw new NotFoundError(PIPELINE_ERRORS.STAGE_NOT_FOUND);
+    if (stage.isWon || stage.isLost) throw new BadRequestError(PIPELINE_ERRORS.IMPORT_ONLY_INTO_OPEN_STAGE);
   }
 
   async getLeadImportProgress(

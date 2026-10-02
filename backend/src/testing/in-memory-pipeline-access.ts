@@ -9,8 +9,8 @@ export class InMemoryPipelineAccess implements Pick<IPipelineRepository, 'findPi
     this.accessByPipelineAndUser.set(`${pipelineId}:${userId}`, level);
   }
 
-  addStage(stageId: string, pipelineId: string): void {
-    this.stages.set(stageId, { id: stageId, pipelineId, isWon: false, isLost: false });
+  addStage(stageId: string, pipelineId: string, { isWon = false, isLost = false }: { isWon?: boolean; isLost?: boolean } = {}): void {
+    this.stages.set(stageId, { id: stageId, pipelineId, isWon, isLost });
   }
 
   async findPipelineAccess(pipelineId: string, { userId, isAdmin }: PipelineViewer): Promise<PipelineAccess | null> {

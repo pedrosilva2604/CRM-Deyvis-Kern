@@ -149,11 +149,13 @@ export class PipelineService implements IPipelineService {
   ): Promise<void> {
     await this.findAccessOrFail(targetPipelineId, loggedUserContext);
     await this.findStageOfPipelineOrFail(targetPipelineId, targetStageId);
-    await this.pipelineRepository.updateStage(targetStageId, {
+    const stageUpdate = await this.pipelineRepository.updateStage(targetStageId, {
       ...stageChanges,
       ...(stageChanges.isWon === true && { isLost: false }),
       ...(stageChanges.isLost === true && { isWon: false }),
     });
+    if (stageUpdate === 'stageNotFound') throw new NotFoundError(PIPELINE_ERRORS.STAGE_NOT_FOUND);
+    if (stageUpdate === 'cardsWithoutWonValue') throw new BadRequestError(PIPELINE_ERRORS.STAGE_HAS_CARDS_WITHOUT_WON_VALUE);
     await this.pipelineChanges.announce(targetPipelineId);
   }
 
@@ -190,7 +192,8 @@ export class PipelineService implements IPipelineService {
 
   async addCard({ targetPipelineId, card }: AddCardRequest, loggedUserContext: LoggedUserContext): Promise<void> {
     await this.findAccessOrFail(targetPipelineId, loggedUserContext);
-    await this.findStageOfPipelineOrFail(targetPipelineId, card.stageId);
+    const stage = await this.findStageOfPipelineOrFail(targetPipelineId, card.stageId);
+    if (stage.isWon || stage.isLost) throw new BadRequestError(PIPELINE_ERRORS.CARD_ONLY_INTO_OPEN_STAGE);
     if (!(await this.leadRepository.findLeadById(card.leadId))) throw new NotFoundError(LEAD_ERRORS.NOT_FOUND);
 
     await this.cardRepository.addCardOnTop({

@@ -83,6 +83,10 @@ export class InMemoryLeadImportRepository implements ILeadImportRepository {
     return storedImport;
   }
 
+  countAll(): number {
+    return this.storedImports.size;
+  }
+
   find(importId: string): StoredLeadImport {
     const storedImport = this.storedImports.get(importId);
     if (!storedImport) throw new Error(`Importação ${importId} não existe no repositório em memória`);
