@@ -43,6 +43,7 @@ interface DeletedLeadContactRecord extends LeadContactRecord {
 
 interface DeletedLeadOfRow {
   deletedLeadId: string;
+  currentPhone: string;
   currentPhoneConfirmed: boolean;
   newPhone: { phone: string; phoneCountry: string | null } | null;
 }
@@ -124,7 +125,7 @@ export class LeadImportRepository implements ILeadImportRepository {
       const insertedPhones = new Set(insertedLeads.map((insertedLead) => insertedLead.phone));
       const rowsNotInserted = leadsToCreate.filter((row) => !insertedPhones.has(row.phone));
       const deletedLeadsOfRows = await this.findDeletedLeadsHoldingRows(transaction, rowsNotInserted, insertedPhones, restoresDeletedLeads);
-      if (restoresDeletedLeads) await this.restoreDeletedLeads(transaction, deletedLeadsOfRows);
+      if (restoresDeletedLeads) await this.restoreDeletedLeads(transaction, importId, deletedLeadsOfRows);
 
       const chunkResult: LeadImportChunkResult = {
         insertedLeads: insertedLeads.length,
@@ -260,6 +261,7 @@ export class LeadImportRepository implements ILeadImportRepository {
       const newPhoneOfRow = bringsNewFreePhone ? { phone: row.phone, phoneCountry: row.phoneCountry } : null;
       deletedLeadById.set(deletedLead.id, {
         deletedLeadId: deletedLead.id,
+        currentPhone: deletedLead.phone,
         currentPhoneConfirmed,
         newPhone: currentPhoneConfirmed ? null : (newPhoneOfRow ?? alreadyFound?.newPhone ?? null),
       });
@@ -267,10 +269,22 @@ export class LeadImportRepository implements ILeadImportRepository {
     return [...deletedLeadById.values()];
   }
 
-  private async restoreDeletedLeads(transaction: DatabaseTransaction, deletedLeadsOfRows: DeletedLeadOfRow[]): Promise<void> {
-    for (const { deletedLeadId, newPhone } of deletedLeadsOfRows) {
-      await transaction.lead.update({ where: { id: deletedLeadId }, data: { deletedAt: null, ...newPhone } });
+  private async restoreDeletedLeads(
+    transaction: DatabaseTransaction,
+    importId: string,
+    deletedLeadsOfRows: DeletedLeadOfRow[],
+  ): Promise<void> {
+    for (const { deletedLeadId, currentPhone, newPhone } of deletedLeadsOfRows) {
+      const keepsCurrentPhone = newPhone === null || (await this.isPhoneInSpreadsheet(transaction, importId, currentPhone));
+      await transaction.lead.update({
+        where: { id: deletedLeadId },
+        data: { deletedAt: null, ...(keepsCurrentPhone ? {} : newPhone) },
+      });
     }
+  }
+
+  private async isPhoneInSpreadsheet(transaction: DatabaseTransaction, importId: string, phone: string): Promise<boolean> {
+    return (await transaction.leadImportRow.count({ where: { leadImportId: importId, phone } })) > 0;
   }
 
   private async findFinishedLeadImport(importId: string, finishedAt: Date): Promise<FinishedLeadImport | null> {

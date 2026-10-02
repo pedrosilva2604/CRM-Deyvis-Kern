@@ -25,10 +25,11 @@ const DISPUTES_TO_CATCH_A_DEADLOCK = 15;
 function chunkWithRows(
   importId: string,
   rows: { phone: string; email: string | null }[],
-  { importedBy }: { importedBy: 'admin' | 'seller' },
+  { importedBy, processedRowsBefore = 0 }: { importedBy: 'admin' | 'seller'; processedRowsBefore?: number },
 ): LeadImportChunk {
   return {
     ...chunkOf(importId, rows.map((row) => row.phone), { importedBy }),
+    processedRowsBefore,
     leadsToCreate: leadsToCreateFrom(rows.map((row) => row.phone), database.funnel).map((lead, rowIndex) => ({
       ...lead,
       email: rows[rowIndex]!.email,
@@ -148,6 +149,27 @@ describe('Lead excluído reconhecido pelo e-mail na importação', () => {
     await leadImports.importChunk(chunkWithRows(importId, rows, { importedBy: 'admin' }));
 
     expect(await database.findLeadByPhone('+5511900000001')).toMatchObject({ name: 'João excluído', deletedAt: null });
+  });
+
+  it('a linha com o telefone atual do João em OUTRO pedaço também mantém o telefone, sem criar um João duplicado', async () => {
+    const ana = await database.addUser('Ana', { role: 'ADMIN' });
+    await database.addLead({ name: 'João excluído', phone: '+5511900000001', email: 'joao@empresa.com', deleted: true });
+    const importId = await database.addLeadImport({
+      requestedById: ana,
+      status: 'PROCESSING',
+      phonesToImport: ['+5511900000099', '+5511900000001'],
+    });
+
+    await leadImports.importChunk(
+      chunkWithRows(importId, [{ phone: '+5511900000099', email: 'joao@empresa.com' }], { importedBy: 'admin' }),
+    );
+    await leadImports.importChunk(
+      chunkWithRows(importId, [{ phone: '+5511900000001', email: null }], { importedBy: 'admin', processedRowsBefore: 1 }),
+    );
+
+    expect(await database.findLeadByPhone('+5511900000001')).toMatchObject({ name: 'João excluído', deletedAt: null });
+    expect(await database.findPhonesOfAllLeads()).toEqual(['+5511900000001']);
+    expect(await database.findLeadImport(importId)).toMatchObject({ restoredLeads: 1, skippedExistingLeads: 1, importedLeads: 0 });
   });
 
   it('duas linhas do mesmo João contam um restaurado e um "já existia"', async () => {
