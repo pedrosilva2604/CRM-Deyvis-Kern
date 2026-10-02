@@ -94,6 +94,16 @@ describe('Retomar uma importação interrompida', () => {
     await expect(retry).rejects.toThrow(LEAD_IMPORT_ERRORS.ALREADY_RUNNING);
   });
 
+  it('o ADMIN que retoma a importação da Maria, ocupada com outra, recebe uma mensagem que fala da Maria', async () => {
+    const { leadImportService, leadImports } = createRetryScenario();
+    leadImports.add({ importId: 'interrompida', status: 'FAILED', requestedById: 'maria' });
+    leadImports.add({ importId: 'rodando', status: 'PROCESSING', requestedById: 'maria' });
+
+    const retryByAdmin = leadImportService.retryLeadImport({ targetImportId: 'interrompida' }, loggedAdmin('ana-admin'));
+
+    await expect(retryByAdmin).rejects.toThrow(LEAD_IMPORT_ERRORS.REQUESTER_HAS_RUNNING_IMPORT);
+  });
+
   it('com o Redis fora do ar, deixa a importação PENDING para o conciliador colocar na fila', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const { leadImportService, leadImports, leadImportQueue } = createRetryScenario();

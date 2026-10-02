@@ -64,7 +64,7 @@ export class LeadImportService implements ILeadImportService {
   async retryLeadImport({ targetImportId }: LeadImportRetryRequest, loggedUserContext: LoggedUserContext): Promise<void> {
     const leadImport = await this.findVisibleLeadImportOrFail(targetImportId, loggedUserContext);
     if (leadImport.status !== LeadImportStatus.FAILED) throw new ConflictError(LEAD_IMPORT_ERRORS.NOT_RETRYABLE);
-    const wasReopened = await this.leadImportRepository.reopenFailedLeadImport(targetImportId);
+    const wasReopened = await this.reopenExplainingWhoHasRunningImport(targetImportId, loggedUserContext);
     if (!wasReopened) throw new ConflictError(LEAD_IMPORT_ERRORS.NOT_RETRYABLE);
 
     await this.audit.recordAuditLog(loggedUserContext, {
@@ -74,6 +74,17 @@ export class LeadImportService implements ILeadImportService {
       details: { processedRows: leadImport.processedRows, rowsToImport: leadImport.rowsToImport },
     });
     await this.leaveForReconcilerIfQueueFails(targetImportId, () => this.leadImportQueue.requeueLeadImport(targetImportId));
+  }
+
+  private async reopenExplainingWhoHasRunningImport(importId: string, { loggedUser }: LoggedUserContext): Promise<boolean> {
+    try {
+      return await this.leadImportRepository.reopenFailedLeadImport(importId);
+    } catch (error) {
+      const isRequesterBusy = error instanceof ConflictError && error.message === LEAD_IMPORT_ERRORS.ALREADY_RUNNING;
+      const isRetriedByRequester = (await this.leadImportRepository.findLeadImportProgress(importId, loggedUser.id)) !== null;
+      if (isRequesterBusy && !isRetriedByRequester) throw new ConflictError(LEAD_IMPORT_ERRORS.REQUESTER_HAS_RUNNING_IMPORT);
+      throw error;
+    }
   }
 
   private async findVisibleLeadImportOrFail(importId: string, { loggedUser }: LoggedUserContext): Promise<LeadImportProgress> {

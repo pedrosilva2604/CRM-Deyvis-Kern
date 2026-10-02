@@ -31,6 +31,7 @@ export const LEAD_IMPORT_ERRORS = {
   NO_PIPELINE_TO_RECEIVE_LEADS: 'Nenhum funil configurado para receber os leads',
   ALREADY_RUNNING: 'Você já tem uma importação em andamento. Aguarde ela terminar para enviar outra planilha.',
   NOT_RETRYABLE: 'Só uma importação interrompida pode ser retomada',
+  REQUESTER_HAS_RUNNING_IMPORT: 'Quem enviou esta planilha já tem outra importação em andamento. Tente de novo quando ela terminar.',
 } as const;
 
 export const NOTIFICATION_ERRORS = {
