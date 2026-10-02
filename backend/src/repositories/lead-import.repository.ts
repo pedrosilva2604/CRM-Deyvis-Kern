@@ -48,6 +48,11 @@ interface DeletedLeadOfRow {
   newPhone: { phone: string; phoneCountry: string | null } | null;
 }
 
+interface RowsHeldByDeletedLeads {
+  rowCount: number;
+  deletedLeads: DeletedLeadOfRow[];
+}
+
 function holdsContactOf(lead: LeadContactRecord, row: LeadImportRowToProcess): boolean {
   return lead.phone === row.phone || (row.email !== null && lead.email === row.email);
 }
@@ -124,20 +129,27 @@ export class LeadImportRepository implements ILeadImportRepository {
       });
       const insertedPhones = new Set(insertedLeads.map((insertedLead) => insertedLead.phone));
       const rowsNotInserted = leadsToCreate.filter((row) => !insertedPhones.has(row.phone));
-      const deletedLeadsOfRows = await this.findDeletedLeadsHoldingRows(transaction, rowsNotInserted, insertedPhones, restoresDeletedLeads);
-      if (restoresDeletedLeads) await this.restoreDeletedLeads(transaction, importId, deletedLeadsOfRows);
+      const rowsHeldByDeletedLeads = await this.findDeletedLeadsHoldingRows(
+        transaction,
+        rowsNotInserted,
+        insertedPhones,
+        restoresDeletedLeads,
+      );
+      if (restoresDeletedLeads) await this.restoreDeletedLeads(transaction, importId, rowsHeldByDeletedLeads.deletedLeads);
 
       const chunkResult: LeadImportChunkResult = {
         insertedLeads: insertedLeads.length,
-        restoredLeads: restoresDeletedLeads ? deletedLeadsOfRows.length : 0,
-        skippedDeletedLeads: restoresDeletedLeads ? 0 : deletedLeadsOfRows.length,
+        restoredLeads: restoresDeletedLeads ? rowsHeldByDeletedLeads.deletedLeads.length : 0,
+        skippedDeletedLeads: restoresDeletedLeads ? 0 : rowsHeldByDeletedLeads.rowCount,
       };
       const advanced = await transaction.leadImport.updateMany({
         where: { id: importId, status: LeadImportStatus.PROCESSING, processedRows: processedRowsBefore },
         data: {
           processedRows: processedRowsBefore + leadsToCreate.length,
           importedLeads: { increment: chunkResult.insertedLeads },
-          skippedExistingLeads: { increment: rowsNotInserted.length - deletedLeadsOfRows.length },
+          skippedExistingLeads: {
+            increment: rowsNotInserted.length - chunkResult.restoredLeads - chunkResult.skippedDeletedLeads,
+          },
           restoredLeads: { increment: chunkResult.restoredLeads },
           skippedDeletedLeads: { increment: chunkResult.skippedDeletedLeads },
         },
@@ -234,8 +246,8 @@ export class LeadImportRepository implements ILeadImportRepository {
     rowsNotInserted: LeadImportRowToProcess[],
     insertedPhones: Set<string>,
     locksDeletedLeads: boolean,
-  ): Promise<DeletedLeadOfRow[]> {
-    if (rowsNotInserted.length === 0) return [];
+  ): Promise<RowsHeldByDeletedLeads> {
+    if (rowsNotInserted.length === 0) return { rowCount: 0, deletedLeads: [] };
     const phones = rowsNotInserted.map((row) => row.phone);
     const emails = rowsNotInserted.flatMap((row) => (row.email ? [row.email] : []));
     const activeLeads = await transaction.lead.findMany({
@@ -249,12 +261,14 @@ export class LeadImportRepository implements ILeadImportRepository {
     const phonesInUse = new Set([...insertedPhones, ...activeLeads.map((lead) => lead.phone), ...deletedLeads.map((lead) => lead.phone)]);
 
     const deletedLeadById = new Map<string, DeletedLeadOfRow>();
+    let rowCount = 0;
     for (const row of rowsNotInserted) {
       if (activeLeads.some((activeLead) => holdsContactOf(activeLead, row))) continue;
       const deletedLead =
         deletedLeads.find((candidate) => candidate.phone === row.phone) ??
         deletedLeads.find((candidate) => row.email !== null && candidate.email === row.email);
       if (!deletedLead) continue;
+      rowCount += 1;
       const alreadyFound = deletedLeadById.get(deletedLead.id);
       const currentPhoneConfirmed = (alreadyFound?.currentPhoneConfirmed ?? false) || row.phone === deletedLead.phone;
       const bringsNewFreePhone = row.phone !== deletedLead.phone && !phonesInUse.has(row.phone);
@@ -266,7 +280,7 @@ export class LeadImportRepository implements ILeadImportRepository {
         newPhone: currentPhoneConfirmed ? null : (newPhoneOfRow ?? alreadyFound?.newPhone ?? null),
       });
     }
-    return [...deletedLeadById.values()];
+    return { rowCount, deletedLeads: [...deletedLeadById.values()] };
   }
 
   private async restoreDeletedLeads(

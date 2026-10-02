@@ -172,6 +172,25 @@ describe('Lead excluído reconhecido pelo e-mail na importação', () => {
     expect(await database.findLeadImport(importId)).toMatchObject({ restoredLeads: 1, skippedExistingLeads: 1, importedLeads: 0 });
   });
 
+  it('na importação de vendedor, duas linhas do mesmo João excluído contam as duas como "pertencem a lead excluído"', async () => {
+    const maria = await database.addUser('Maria');
+    await database.addLead({ name: 'João excluído', phone: '+5511900000001', email: 'joao@empresa.com', deleted: true });
+    const importId = await database.addLeadImport({ requestedById: maria, status: 'PROCESSING' });
+
+    await leadImports.importChunk(
+      chunkWithRows(
+        importId,
+        [
+          { phone: '+5511900000001', email: null },
+          { phone: '+5511900000099', email: 'joao@empresa.com' },
+        ],
+        { importedBy: 'seller' },
+      ),
+    );
+
+    expect(await database.findLeadImport(importId)).toMatchObject({ skippedDeletedLeads: 2, skippedExistingLeads: 0, restoredLeads: 0 });
+  });
+
   it('duas linhas do mesmo João contam um restaurado e um "já existia"', async () => {
     const ana = await database.addUser('Ana', { role: 'ADMIN' });
     await database.addLead({ name: 'João excluído', phone: '+5511900000001', email: 'joao@empresa.com', deleted: true });
