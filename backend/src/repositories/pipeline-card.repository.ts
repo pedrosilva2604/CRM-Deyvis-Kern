@@ -34,6 +34,12 @@ const SMALLEST_GAP_BEFORE_RENUMBERING = 1e-6;
 
 const visibleCards = { lead: { deletedAt: null } };
 
+export async function lockStagesForCardPlacement(transaction: DatabaseTransaction, stageIds: string[]): Promise<void> {
+  const stageIdsInLockOrder = [...stageIds].sort();
+  await transaction.$queryRaw`
+    SELECT "id" FROM "Stage" WHERE "id" = ANY(${stageIdsInLockOrder}::uuid[]) ORDER BY "id" FOR UPDATE`;
+}
+
 export class PipelineCardRepository implements IPipelineCardRepository {
   constructor(private readonly prisma: DatabaseClient) {}
 
@@ -65,6 +71,7 @@ export class PipelineCardRepository implements IPipelineCardRepository {
 
   async addCardOnTop({ pipelineId, stageId, leadId, addedById }: NewCard): Promise<void> {
     await this.prisma.$transaction(async (transaction) => {
+      await lockStagesForCardPlacement(transaction, [stageId]);
       const position = await this.findPositionOnTop(transaction, stageId, null);
       await transaction.pipelineCard.create({ data: { pipelineId, stageId, leadId, addedById, position } });
     });
@@ -72,6 +79,7 @@ export class PipelineCardRepository implements IPipelineCardRepository {
 
   async moveCard(cardId: string, { stageId, previousCardId, closing }: CardDestination): Promise<void> {
     await this.prisma.$transaction(async (transaction) => {
+      await lockStagesForCardPlacement(transaction, [stageId]);
       const position =
         previousCardId === null
           ? await this.findPositionOnTop(transaction, stageId, cardId)

@@ -185,6 +185,11 @@ export class TestDatabase {
     return cards.map(({ lead }) => lead.name);
   }
 
+  async findCardPositionsOfStage(stageId: string): Promise<number[]> {
+    const cards = await this.client.pipelineCard.findMany({ where: { stageId }, select: { position: true } });
+    return cards.map(({ position }) => position);
+  }
+
   async findCard(cardId: string) {
     return await this.client.pipelineCard.findUniqueOrThrow({ where: { id: cardId } });
   }

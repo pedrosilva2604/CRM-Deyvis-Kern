@@ -39,6 +39,19 @@ describe('Adicionar lead da base ao funil', () => {
     expect(await database.findLeadNamesInStageOrder(newStage)).toEqual(['Bruno', 'Ana']);
   });
 
+  it('vários leads adicionados ao mesmo tempo ganham posições diferentes', async () => {
+    const leadIds = await Promise.all(
+      Array.from({ length: 12 }, (_, leadIndex) =>
+        database.addLead({ name: `Lead ${leadIndex}`, phone: `+55119000001${String(leadIndex).padStart(2, '0')}` }),
+      ),
+    );
+
+    await Promise.all(leadIds.map((leadId) => cards.addCardOnTop({ pipelineId: funnel.pipelineId, stageId: newStage, leadId, addedById: null })));
+
+    const positions = await database.findCardPositionsOfStage(newStage);
+    expect(new Set(positions).size).toBe(leadIds.length);
+  });
+
   it('não deixa o mesmo lead entrar duas vezes no mesmo funil', async () => {
     const ana = await database.addLead({ name: 'Ana', phone: '+5511900000001' });
     await cards.addCardOnTop({ pipelineId: funnel.pipelineId, stageId: newStage, leadId: ana, addedById: null });

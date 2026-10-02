@@ -11,7 +11,7 @@ import {
   type UpdateStageInput,
 } from '@/models/pipeline.model';
 import type { DatabaseClient, DatabaseTransaction } from '@/repositories/database-client';
-import { CARD_POSITION_GAP } from '@/repositories/pipeline-card.repository';
+import { CARD_POSITION_GAP, lockStagesForCardPlacement } from '@/repositories/pipeline-card.repository';
 
 export interface PipelineViewer {
   userId: string;
@@ -161,6 +161,7 @@ export class PipelineRepository implements IPipelineRepository {
 
   async deleteStageMovingCards(stageId: string, receivingStageId: string): Promise<void> {
     await this.prisma.$transaction(async (transaction) => {
+      await lockStagesForCardPlacement(transaction, [stageId, receivingStageId]);
       await this.appendCardsToStage(transaction, stageId, receivingStageId);
       await transaction.stage.delete({ where: { id: stageId } });
     });
