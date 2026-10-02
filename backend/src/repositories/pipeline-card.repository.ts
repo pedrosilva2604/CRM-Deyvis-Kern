@@ -6,6 +6,8 @@ import {
   type StageCardsPage,
   type StageCardsQuery,
 } from '@/models/pipeline.model';
+import { NotFoundError } from '@/errors/app-errors';
+import { PIPELINE_ERRORS } from '@/errors/errors.constants';
 import type { DatabaseClient, DatabaseTransaction } from '@/repositories/database-client';
 
 export interface NewCard {
@@ -34,10 +36,16 @@ const SMALLEST_GAP_BEFORE_RENUMBERING = 1e-6;
 
 const visibleCards = { lead: { deletedAt: null } };
 
-export async function lockStagesForCardPlacement(transaction: DatabaseTransaction, stageIds: string[]): Promise<void> {
+export async function lockStagesForCardPlacement(transaction: DatabaseTransaction, stageIds: string[]): Promise<string[]> {
   const stageIdsInLockOrder = [...stageIds].sort();
-  await transaction.$queryRaw`
+  const lockedStages = await transaction.$queryRaw<{ id: string }[]>`
     SELECT "id" FROM "Stage" WHERE "id" = ANY(${stageIdsInLockOrder}::uuid[]) ORDER BY "id" FOR UPDATE`;
+  return lockedStages.map((lockedStage) => lockedStage.id);
+}
+
+async function lockStageOrFail(transaction: DatabaseTransaction, stageId: string): Promise<void> {
+  const lockedStageIds = await lockStagesForCardPlacement(transaction, [stageId]);
+  if (lockedStageIds.length === 0) throw new NotFoundError(PIPELINE_ERRORS.STAGE_NOT_FOUND);
 }
 
 export class PipelineCardRepository implements IPipelineCardRepository {
@@ -71,7 +79,7 @@ export class PipelineCardRepository implements IPipelineCardRepository {
 
   async addCardOnTop({ pipelineId, stageId, leadId, addedById }: NewCard): Promise<void> {
     await this.prisma.$transaction(async (transaction) => {
-      await lockStagesForCardPlacement(transaction, [stageId]);
+      await lockStageOrFail(transaction, stageId);
       const position = await this.findPositionOnTop(transaction, stageId, null);
       await transaction.pipelineCard.create({ data: { pipelineId, stageId, leadId, addedById, position } });
     });
@@ -79,7 +87,7 @@ export class PipelineCardRepository implements IPipelineCardRepository {
 
   async moveCard(cardId: string, { stageId, previousCardId, closing }: CardDestination): Promise<void> {
     await this.prisma.$transaction(async (transaction) => {
-      await lockStagesForCardPlacement(transaction, [stageId]);
+      await lockStageOrFail(transaction, stageId);
       const position =
         previousCardId === null
           ? await this.findPositionOnTop(transaction, stageId, cardId)

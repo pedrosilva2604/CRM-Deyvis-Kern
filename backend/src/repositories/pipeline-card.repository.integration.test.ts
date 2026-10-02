@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { ConflictError } from '@/errors/app-errors';
+import { ConflictError, NotFoundError } from '@/errors/app-errors';
 import { PIPELINE_ERRORS } from '@/errors/errors.constants';
 import { TestDatabase, type TestPipeline } from '@/testing/integration/test-database';
 import { PipelineCardRepository } from './pipeline-card.repository';
@@ -85,6 +85,17 @@ describe('Arrastar cartões', () => {
 
     expect(await database.findLeadNamesInStageOrder(proposalStage)).toEqual(['Ana', 'Bruno', 'Carla']);
     expect(await database.findLeadNamesInStageOrder(newStage)).toEqual([]);
+  });
+
+  it('arrastar para uma etapa que acabou de ser excluída responde "etapa não encontrada"', async () => {
+    const cardOfAna = await addLeadWithCard('Ana', '+5511900000001', newStage, 1024);
+    await database.client.stage.delete({ where: { id: proposalStage } });
+
+    const move = cards.moveCard(cardOfAna, { stageId: proposalStage, previousCardId: null, closing: keepClosing });
+
+    await expect(move).rejects.toBeInstanceOf(NotFoundError);
+    await expect(move).rejects.toThrow(PIPELINE_ERRORS.STAGE_NOT_FOUND);
+    expect(await database.findLeadNamesInStageOrder(newStage)).toEqual(['Ana']);
   });
 
   it('move para o topo quando não há cartão de referência', async () => {

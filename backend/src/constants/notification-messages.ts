@@ -31,9 +31,11 @@ function describeCompletedLeadImport({
   if (skippedDeletedLeads > 0) {
     sentences.push(`${formatLeadCount(skippedDeletedLeads)} pertencem a leads excluídos: peça a um administrador para restaurá-los.`);
   }
-  if (destination !== null) sentences.push(`${formatLeadCount(addedToPipelineLeads)} entraram no funil.`);
-  if (alreadyInPipelineLeads > 0) {
-    sentences.push(`${formatLeadCount(alreadyInPipelineLeads)} já estavam no funil e continuaram onde estavam.`);
+  if (destination !== null) {
+    sentences.push(`${formatLeadCount(addedToPipelineLeads)} entraram no funil.`);
+    if (alreadyInPipelineLeads > 0) {
+      sentences.push(`${formatLeadCount(alreadyInPipelineLeads)} já estavam no funil e continuaram onde estavam.`);
+    }
   }
   return sentences.join(' ');
 }

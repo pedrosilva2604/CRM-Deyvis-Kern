@@ -278,6 +278,23 @@ describe('Importação direto numa etapa do funil', () => {
     expect(chunkResult).toMatchObject({ skippedDeletedLeads: 1, addedToPipelineLeads: 0 });
     expect(await database.findLeadNamesInStageOrder(funnel.stageIdByName['Novo lead']!)).toEqual([]);
   });
+
+  it('se o funil foi excluído no meio da importação, os leads ficam só na base, sem falhar', async () => {
+    const maria = await database.addUser('Maria');
+    const funnel = await database.addPipeline(maria, ['Novo lead']);
+    const destinationBeforeDeletion = { pipelineId: funnel.pipelineId, stageId: funnel.stageIdByName['Novo lead']! };
+    const importId = await database.addLeadImport({ requestedById: maria, status: 'PROCESSING' });
+    await database.client.pipeline.delete({ where: { id: funnel.pipelineId } });
+
+    const chunkResult = await leadImports.importChunk({
+      ...chunkOf(importId, ['+5511900000001', '+5511900000002'], { importedBy: 'seller' }),
+      destination: destinationBeforeDeletion,
+      addedById: maria,
+    });
+
+    expect(chunkResult).toMatchObject({ insertedLeads: 2, addedToPipelineLeads: 0, alreadyInPipelineLeads: 0 });
+    expect(await database.findLeadImport(importId)).toMatchObject({ processedRows: 2, importedLeads: 2 });
+  });
 });
 
 describe('Duas importações gravando os mesmos telefones ao mesmo tempo', () => {

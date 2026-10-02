@@ -334,7 +334,8 @@ export class LeadImportRepository implements ILeadImportRepository {
   ): Promise<PipelinePlacement> {
     const leadIdsOfRows = await this.findActiveLeadIdsOfRows(transaction, rows);
     if (leadIdsOfRows.length === 0) return NOTHING_PLACED_IN_PIPELINE;
-    await lockStagesForCardPlacement(transaction, [destination.stageId]);
+    const lockedStageIds = await lockStagesForCardPlacement(transaction, [destination.stageId]);
+    if (lockedStageIds.length === 0) return NOTHING_PLACED_IN_PIPELINE;
     const topPosition = await this.findTopPositionOfStage(transaction, destination.stageId);
     const addedToPipelineLeads = await this.addCardsAboveTop(transaction, { destination, leadIds: leadIdsOfRows, addedById, topPosition });
     return { addedToPipelineLeads, alreadyInPipelineLeads: leadIdsOfRows.length - addedToPipelineLeads };
