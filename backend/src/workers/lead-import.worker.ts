@@ -51,7 +51,7 @@ export class LeadImportWorker {
     try {
       await this.leadImportProcessingService.markLeadImportAsFailed(job.data.importId, error.message);
     } catch (markingError) {
-      console.error(`Importação ${job.data.importId} falhou e não pôde ser marcada como FAILED: ${(markingError as Error).message}`);
+      logFailure({ worker: 'lead-import', importId: job.data.importId, step: 'mark-as-failed' }, markingError);
     }
   }
 }

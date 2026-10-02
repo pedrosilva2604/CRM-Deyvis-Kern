@@ -1,6 +1,8 @@
 import type { Server as HttpServer } from 'node:http';
 import { Server, type Socket } from 'socket.io';
+import { UnauthorizedError } from '@/errors/app-errors';
 import type { AuthUser } from '@/models/auth.model';
+import { logFailure } from './technical-error';
 import type { ISessionService } from '@/services/session.service';
 import type { RealtimeEventDelivery, RealtimeEventName } from './realtime-events';
 import type { SessionCookie } from './session-cookie';
@@ -51,7 +53,8 @@ export class SocketGateway implements RealtimeEventDelivery {
       const token = this.sessionCookie.readSessionToken(socket.handshake.headers.cookie) ?? '';
       socket.data.user = await this.sessions.validateSession(token);
       next();
-    } catch {
+    } catch (error) {
+      if (!(error instanceof UnauthorizedError)) logFailure({ realtime: 'socket-authentication', socketId: socket.id }, error);
       next(new Error('unauthorized'));
     }
   };
