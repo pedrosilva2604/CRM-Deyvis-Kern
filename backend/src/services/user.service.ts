@@ -120,7 +120,7 @@ export class UserService implements IUserService, IUserPasswordUpdater {
     const targetUser = await this.findExistingUserOrFail(targetUserId);
     this.assertIsNotSelf(targetUser, loggedUserContext);
 
-    const wasDeleted = await this.userRepository.deleteUserKeepingAnActiveAdmin(targetUserId);
+    const wasDeleted = await this.userRepository.deleteUserKeepingAnActiveAdmin(targetUserId, loggedUserContext.loggedUser.id);
     if (!wasDeleted) throw new BadRequestError(USER_ERRORS.LAST_ADMIN);
     this.sessions.notifyAllUserSessionsEnded(targetUserId);
     await this.recordUserAuditLog(loggedUserContext, 'user.delete', targetUserId, {

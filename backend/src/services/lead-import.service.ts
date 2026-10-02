@@ -13,7 +13,6 @@ import type {
 } from '@/models/lead-import.model';
 import type { ILeadImportQueue } from '@/queues/lead-import.queue';
 import type { ILeadImportRepository } from '@/repositories/lead-import.repository';
-import type { IPipelineRepository, StageLocation } from '@/repositories/pipeline.repository';
 import type { IAuditService } from './audit.service';
 
 export interface LeadImportLimits {
@@ -29,7 +28,6 @@ export interface ILeadImportService {
 export class LeadImportService implements ILeadImportService {
   constructor(
     private readonly leadImportRepository: ILeadImportRepository,
-    private readonly pipelineRepository: IPipelineRepository,
     private readonly leadImportQueue: ILeadImportQueue,
     private readonly audit: IAuditService,
     private readonly businessCalendar: BusinessCalendar,
@@ -39,13 +37,12 @@ export class LeadImportService implements ILeadImportService {
   async requestLeadImport(csvText: string, loggedUserContext: LoggedUserContext): Promise<LeadImportReceipt> {
     await this.assertNoRunningImport(loggedUserContext.loggedUser.id);
     const spreadsheetContent = this.readSpreadsheetOrFail(csvText);
-    const receivingStage = await this.findStageToReceiveLeadsOrFail();
     const importId = await this.leadImportRepository.createLeadImport({
       totalRows: spreadsheetContent.totalRows,
       invalidRows: spreadsheetContent.invalidRows.length,
       duplicateRowsInFile: spreadsheetContent.duplicateRows.length,
-      pipelineId: receivingStage.pipelineId,
-      stageId: receivingStage.stageId,
+      pipelineId: null,
+      stageId: null,
       requestedById: loggedUserContext.loggedUser.id,
       rows: spreadsheetContent.rowsToImport.map((row) => this.toLeadImportRowData(row)),
     });
@@ -118,12 +115,6 @@ export class LeadImportService implements ILeadImportService {
     if (spreadsheetReading.status === 'unreadable') throw new BadRequestError(spreadsheetReading.reason);
     if (spreadsheetReading.content.rowsToImport.length === 0) throw new BadRequestError(LEAD_IMPORT_ERRORS.NO_ROWS_TO_IMPORT);
     return spreadsheetReading.content;
-  }
-
-  private async findStageToReceiveLeadsOrFail(): Promise<StageLocation> {
-    const receivingStage = await this.pipelineRepository.findFirstStageOfFirstPipeline();
-    if (!receivingStage) throw new BadRequestError(LEAD_IMPORT_ERRORS.NO_PIPELINE_TO_RECEIVE_LEADS);
-    return receivingStage;
   }
 
   private toLeadImportRowData(row: LeadSpreadsheetRowToImport): LeadImportRowData {

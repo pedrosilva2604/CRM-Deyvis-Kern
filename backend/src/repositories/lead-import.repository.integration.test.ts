@@ -15,7 +15,8 @@ function newImportRequestedBy(requestedById: string) {
     invalidRows: 0,
     duplicateRowsInFile: 0,
     requestedById,
-    ...database.funnel,
+    pipelineId: null,
+    stageId: null,
     rows: [{ rowNumber: 1, name: 'Lead', phone: '+5511900000001', phoneCountry: 'BR', email: null, enteredOn: finishedAt }],
   };
 }
@@ -30,7 +31,7 @@ function chunkWithRows(
   return {
     ...chunkOf(importId, rows.map((row) => row.phone), { importedBy }),
     processedRowsBefore,
-    leadsToCreate: leadsToCreateFrom(rows.map((row) => row.phone), database.funnel).map((lead, rowIndex) => ({
+    leadsToCreate: leadsToCreateFrom(rows.map((row) => row.phone)).map((lead, rowIndex) => ({
       ...lead,
       email: rows[rowIndex]!.email,
     })),
@@ -42,7 +43,7 @@ function chunkOf(importId: string, phones: string[], { importedBy }: { importedB
     importId,
     processedRowsBefore: 0,
     restoresDeletedLeads: importedBy === 'admin',
-    leadsToCreate: leadsToCreateFrom(phones, database.funnel),
+    leadsToCreate: leadsToCreateFrom(phones),
   };
 }
 

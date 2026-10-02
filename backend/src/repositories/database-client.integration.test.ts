@@ -20,7 +20,6 @@ function newLead(lead: Pick<CreateLeadData, 'name' | 'phone' | 'email'>): Create
     value: null,
     enteredOn: new Date('2026-09-30T00:00:00.000Z'),
     assignedToId: null,
-    ...database.funnel,
   };
 }
 

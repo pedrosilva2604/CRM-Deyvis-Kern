@@ -25,7 +25,6 @@ import type {
   UpdateLeadRequest,
 } from '@/models/lead.model';
 import type { ILeadRepository } from '@/repositories/lead.repository';
-import type { IPipelineRepository, StageLocation } from '@/repositories/pipeline.repository';
 import type { IUserRepository } from '@/repositories/user.repository';
 import type { IAuditService } from './audit.service';
 
@@ -62,7 +61,6 @@ const MESSAGE_FOR_SELLER_BY_HELD_CONTACT: Record<LeadHoldingContact['heldContact
 export class LeadService implements ILeadService {
   constructor(
     private readonly leadRepository: ILeadRepository,
-    private readonly pipelineRepository: IPipelineRepository,
     private readonly userRepository: IUserRepository,
     private readonly audit: IAuditService,
     private readonly businessCalendar: BusinessCalendar,
@@ -81,16 +79,14 @@ export class LeadService implements ILeadService {
   }
 
   async getLeadFilterOptions(): Promise<LeadFilterOptions> {
-    const [pipelines, sources, assignees] = await Promise.all([
-      this.pipelineRepository.findPipelinesWithStages(),
+    const [sources, assignees] = await Promise.all([
       this.leadRepository.findSourcesInUse(),
       this.userRepository.findActiveUsersForAssignment(),
     ]);
-    return { pipelines, sources, assignees };
+    return { sources, assignees };
   }
 
   async createLead(newLead: CreateLeadInput, loggedUserContext: LoggedUserContext): Promise<LeadOutput> {
-    const stageLocation = await this.findStageLocationOrFail(newLead.stageId);
     if (newLead.assignedToId) await this.assertAssigneeIsAvailable(newLead.assignedToId);
     await this.assertContactIsAvailable({ phone: newLead.phone, email: newLead.email }, null, loggedUserContext);
 
@@ -103,8 +99,6 @@ export class LeadService implements ILeadService {
       tags: newLead.tags,
       value: newLead.value,
       enteredOn: this.readEnteredOnOrToday(newLead.enteredOn),
-      pipelineId: stageLocation.pipelineId,
-      stageId: stageLocation.stageId,
       assignedToId: newLead.assignedToId,
     });
 
@@ -130,7 +124,6 @@ export class LeadService implements ILeadService {
       targetLeadId,
       loggedUserContext,
     );
-    const stageLocation = effectiveChanges.stageId ? await this.findStageLocationOrFail(effectiveChanges.stageId) : null;
 
     const leadData: UpdateLeadData = {
       name: effectiveChanges.name,
@@ -145,7 +138,6 @@ export class LeadService implements ILeadService {
         phoneCountry: this.countryOfPhone(effectiveChanges.phone),
       }),
       ...(effectiveChanges.enteredOn && { enteredOn: this.readEnteredOnOrToday(effectiveChanges.enteredOn) }),
-      ...(stageLocation && { stageId: stageLocation.stageId, pipelineId: stageLocation.pipelineId }),
     };
 
     await this.leadRepository.updateLead(targetLeadId, leadData);
@@ -192,7 +184,6 @@ export class LeadService implements ILeadService {
       phone: existingLead.phone,
       email: existingLead.email,
       enteredOn: existingLead.enteredOn,
-      stageId: existingLead.stage.id,
       source: existingLead.source,
       tags: existingLead.tags,
       value: existingLead.value,
@@ -213,12 +204,6 @@ export class LeadService implements ILeadService {
     const lead = await this.leadRepository.findLeadById(leadId);
     if (!lead) throw new NotFoundError(LEAD_ERRORS.NOT_FOUND);
     return lead;
-  }
-
-  private async findStageLocationOrFail(stageId: string): Promise<StageLocation> {
-    const stageLocation = await this.pipelineRepository.findStageLocation(stageId);
-    if (!stageLocation) throw new BadRequestError(LEAD_ERRORS.STAGE_NOT_FOUND);
-    return stageLocation;
   }
 
   private async assertAssigneeIsAvailable(assigneeId: string): Promise<void> {

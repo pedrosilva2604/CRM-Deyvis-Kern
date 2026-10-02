@@ -34,7 +34,7 @@ describe('Sempre sobra um administrador ativo', () => {
   it('não exclui o último admin ativo', async () => {
     const ana = await database.addUser('Ana', { role: 'ADMIN' });
 
-    expect(await users.deleteUserKeepingAnActiveAdmin(ana)).toBe(false);
+    expect(await users.deleteUserKeepingAnActiveAdmin(ana, ana)).toBe(false);
     expect(await database.countActiveAdmins()).toBe(1);
   });
 

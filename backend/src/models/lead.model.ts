@@ -2,14 +2,6 @@ import type { LeadContactStatus, Prisma } from '@prisma/client';
 
 export const UNASSIGNED_LEADS_FILTER = 'unassigned';
 
-export interface LeadStageOutput {
-  id: string;
-  name: string;
-  color: string;
-  isWon: boolean;
-  isLost: boolean;
-}
-
 export interface LeadPersonOutput {
   id: string;
   name: string;
@@ -26,8 +18,6 @@ export interface LeadOutput {
   value: string | null;
   contactStatus: LeadContactStatus;
   enteredOn: string;
-  pipeline: LeadPersonOutput;
-  stage: LeadStageOutput;
   assignedTo: LeadPersonOutput | null;
   unreadCount: number;
   lastMessageAt: Date | null;
@@ -37,7 +27,6 @@ export interface LeadOutput {
 
 export interface LeadListFilters {
   search?: string;
-  stageId?: string;
   source?: string;
   assignment?: string;
   contactStatus?: LeadContactStatus;
@@ -60,14 +49,7 @@ export interface LeadListPage {
   pageSize: number;
 }
 
-export interface LeadPipelineOption {
-  id: string;
-  name: string;
-  stages: LeadStageOutput[];
-}
-
 export interface LeadFilterOptions {
-  pipelines: LeadPipelineOption[];
   sources: string[];
   assignees: LeadPersonOutput[];
 }
@@ -77,7 +59,6 @@ export interface CreateLeadInput {
   phone: string;
   email: string | null;
   enteredOn: string | null;
-  stageId: string;
   source: string | null;
   tags: string[];
   value: string | null;
@@ -89,7 +70,6 @@ export interface UpdateLeadInput {
   phone?: string;
   email?: string | null;
   enteredOn?: string;
-  stageId?: string;
   source?: string | null;
   tags?: string[];
   value?: string | null;
@@ -129,13 +109,10 @@ export interface CreateLeadData {
   tags: string[];
   value: string | null;
   enteredOn: Date;
-  pipelineId: string;
-  stageId: string;
   assignedToId: string | null;
 }
 
-export type UpdateLeadData = Partial<Omit<CreateLeadData, 'pipelineId'>> & {
-  pipelineId?: string;
+export type UpdateLeadData = Partial<CreateLeadData> & {
   contactStatus?: LeadContactStatus;
 };
 
@@ -157,8 +134,6 @@ export interface RestoreLeadRequest {
 export const notDeletedLeads = { deletedAt: null } satisfies Prisma.LeadWhereInput;
 
 export const leadOutputRelations = {
-  pipeline: { select: { id: true, name: true } },
-  stage: { select: { id: true, name: true, color: true, isWon: true, isLost: true } },
   assignedTo: { select: { id: true, name: true } },
 } satisfies Prisma.LeadInclude;
 
@@ -176,8 +151,6 @@ export function toLeadOutput(lead: LeadWithRelations): LeadOutput {
     value: lead.value === null ? null : lead.value.toFixed(2),
     contactStatus: lead.contactStatus,
     enteredOn: lead.enteredOn.toISOString().slice(0, 10),
-    pipeline: lead.pipeline,
-    stage: lead.stage,
     assignedTo: lead.assignedTo,
     unreadCount: lead.unreadCount,
     lastMessageAt: lead.lastMessageAt,

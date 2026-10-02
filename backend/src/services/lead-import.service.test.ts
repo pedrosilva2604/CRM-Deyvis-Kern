@@ -5,7 +5,6 @@ import { TimeZoneBusinessCalendar } from '@/infra/business-calendar';
 import { FixedClock } from '@/testing/fixed-clock';
 import { InMemoryLeadImportQueue } from '@/testing/in-memory-lead-import.queue';
 import { InMemoryLeadImportRepository } from '@/testing/in-memory-lead-import.repository';
-import { InMemoryPipelineRepository } from '@/testing/in-memory-pipeline.repository';
 import { loggedAdmin, loggedSeller } from '@/testing/logged-users';
 import { RecordingAuditService } from '@/testing/recording-audit.service';
 import { LeadImportService } from './lead-import.service';
@@ -18,7 +17,6 @@ function createRetryScenario() {
   const audit = new RecordingAuditService();
   const leadImportService = new LeadImportService(
     leadImports,
-    new InMemoryPipelineRepository(),
     leadImportQueue,
     audit,
     new TimeZoneBusinessCalendar(clock, 'America/Sao_Paulo'),

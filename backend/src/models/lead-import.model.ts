@@ -29,8 +29,8 @@ export interface CreateLeadImportData {
   totalRows: number;
   invalidRows: number;
   duplicateRowsInFile: number;
-  pipelineId: string;
-  stageId: string;
+  pipelineId: string | null;
+  stageId: string | null;
   requestedById: string;
   rows: LeadImportRowData[];
 }
@@ -54,8 +54,8 @@ export interface LeadImportToProcess extends LeadImportCounters {
   importId: string;
   requestedById: string | null;
   restoresDeletedLeads: boolean;
-  pipelineId: string;
-  stageId: string;
+  pipelineId: string | null;
+  stageId: string | null;
 }
 
 export interface LeadImportRowToProcess {
@@ -70,7 +70,7 @@ export interface LeadImportChunk {
   importId: string;
   processedRowsBefore: number;
   restoresDeletedLeads: boolean;
-  leadsToCreate: Array<LeadImportRowToProcess & { pipelineId: string; stageId: string }>;
+  leadsToCreate: LeadImportRowToProcess[];
 }
 
 export interface LeadImportChunkResult {

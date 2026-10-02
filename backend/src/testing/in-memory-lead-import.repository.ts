@@ -16,8 +16,8 @@ export interface StoredLeadImport {
   importId: string;
   status: LeadImportStatus;
   requestedById: string | null;
-  pipelineId: string;
-  stageId: string;
+  pipelineId: string | null;
+  stageId: string | null;
   rows: LeadImportRowToProcess[];
   totalRows: number;
   invalidRows: number;
@@ -52,8 +52,8 @@ export class InMemoryLeadImportRepository implements ILeadImportRepository {
     const storedImport: StoredLeadImport = {
       status: 'PENDING',
       requestedById: 'usuario-que-importou',
-      pipelineId: 'funil-padrao',
-      stageId: 'primeira-etapa',
+      pipelineId: null,
+      stageId: null,
       totalRows: rows.length,
       invalidRows: 0,
       duplicateRowsInFile: 0,

@@ -6,6 +6,7 @@ import { createDatabaseClient, type DatabaseClient } from '@/repositories/databa
 export interface TestFunnel {
   pipelineId: string;
   stageId: string;
+  ownerId: string;
 }
 
 export interface LeadToAdd {
@@ -20,6 +21,7 @@ export interface LeadImportToAdd {
   status: LeadImportStatus;
   phonesToImport?: string[];
   processedRows?: number;
+  intoTestFunnel?: boolean;
 }
 
 export interface UserToAdd {
@@ -52,11 +54,12 @@ export class TestDatabase {
       this.client.pipeline.deleteMany(),
       this.client.user.deleteMany(),
     ]);
+    const owner = await this.addUser('Dono do funil de teste');
     const pipeline = await this.client.pipeline.create({
-      data: { name: 'Funil de teste', stages: { create: { name: 'Novo' } } },
+      data: { name: 'Funil de teste', ownerId: owner, stages: { create: { name: 'Novo' } } },
       include: { stages: true },
     });
-    this.currentFunnel = { pipelineId: pipeline.id, stageId: pipeline.stages[0]!.id };
+    this.currentFunnel = { pipelineId: pipeline.id, stageId: pipeline.stages[0]!.id, ownerId: owner };
   }
 
   async addUser(name: string, { role = 'AGENT', active = true }: UserToAdd = {}): Promise<string> {
@@ -104,14 +107,13 @@ export class TestDatabase {
         email: email ?? null,
         enteredOn: ENTERED_ON,
         deletedAt: deleted ? new Date() : null,
-        ...this.funnel,
       },
       select: { id: true },
     });
     return lead.id;
   }
 
-  async addLeadImport({ requestedById, status, phonesToImport = [], processedRows = 0 }: LeadImportToAdd): Promise<string> {
+  async addLeadImport({ requestedById, status, phonesToImport = [], processedRows = 0, intoTestFunnel = false }: LeadImportToAdd): Promise<string> {
     const leadImport = await this.client.leadImport.create({
       data: {
         status,
@@ -121,7 +123,7 @@ export class TestDatabase {
         duplicateRowsInFile: 0,
         rowsToImport: phonesToImport.length,
         processedRows,
-        ...this.funnel,
+        ...(intoTestFunnel && { pipelineId: this.funnel.pipelineId, stageId: this.funnel.stageId }),
         rows: {
           createMany: {
             data: phonesToImport.map((phone, rowIndex) => ({
@@ -160,13 +162,12 @@ export class TestDatabase {
   }
 }
 
-export function leadsToCreateFrom(phones: string[], funnel: TestFunnel) {
+export function leadsToCreateFrom(phones: string[]) {
   return phones.map((phone) => ({
     name: `Lead ${phone}`,
     phone,
     phoneCountry: 'BR',
     email: null,
     enteredOn: ENTERED_ON,
-    ...funnel,
   }));
 }

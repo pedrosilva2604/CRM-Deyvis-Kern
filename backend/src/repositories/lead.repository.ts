@@ -41,7 +41,6 @@ function buildAssignmentCondition(assignment: string): Prisma.Sql {
 function buildListCondition(listQuery: LeadListQuery): Prisma.Sql {
   const conditions = [Prisma.sql`"deletedAt" IS NULL`];
   if (listQuery.search) conditions.push(buildSearchCondition(listQuery.search));
-  if (listQuery.stageId) conditions.push(Prisma.sql`"stageId" = ${listQuery.stageId}::uuid`);
   if (listQuery.source) conditions.push(Prisma.sql`"source" = ${listQuery.source}`);
   if (listQuery.assignment) conditions.push(buildAssignmentCondition(listQuery.assignment));
   if (listQuery.contactStatus) {

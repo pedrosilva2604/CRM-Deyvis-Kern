@@ -106,7 +106,7 @@ export class LeadImportProcessingService implements ILeadImportProcessingService
       importId: leadImport.importId,
       processedRowsBefore: counters.processedRows,
       restoresDeletedLeads: leadImport.restoresDeletedLeads,
-      leadsToCreate: rowsInLockOrder.map((row) => ({ ...row, pipelineId: leadImport.pipelineId, stageId: leadImport.stageId })),
+      leadsToCreate: rowsInLockOrder,
     };
   }
 }

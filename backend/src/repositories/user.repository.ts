@@ -1,4 +1,5 @@
 import { Role, type Theme } from '@prisma/client';
+import { DEFAULT_PIPELINE_STAGES, defaultPipelineNameFor } from '@/constants/default-pipeline';
 import type { LeadPersonOutput } from '@/models/lead.model';
 import {
   toRegisteredUserOutput,
@@ -24,7 +25,7 @@ export interface IUserRepository {
   updateUserTheme(id: string, theme: Theme): Promise<UserOutput>;
   activateUser(id: string): Promise<RegisteredUserOutput>;
   deactivateUserKeepingAnActiveAdmin(id: string): Promise<RegisteredUserOutput | null>;
-  deleteUserKeepingAnActiveAdmin(id: string): Promise<boolean>;
+  deleteUserKeepingAnActiveAdmin(id: string, newPipelineOwnerId: string): Promise<boolean>;
   replaceUserPassword(id: string, passwordHash: string, resetTokenToConsume: string | null): Promise<boolean>;
 }
 
@@ -36,7 +37,12 @@ export class UserRepository implements IUserRepository {
   constructor(private readonly prisma: DatabaseClient) {}
 
   async createUser(data: CreateUserData): Promise<RegisteredUserOutput> {
-    const user = await this.prisma.user.create({ data });
+    const user = await this.prisma.user.create({
+      data: {
+        ...data,
+        ownedPipelines: { create: { name: defaultPipelineNameFor(data.name), stages: { create: DEFAULT_PIPELINE_STAGES } } },
+      },
+    });
     return toRegisteredUserOutput(user);
   }
 
@@ -99,9 +105,10 @@ export class UserRepository implements IUserRepository {
     });
   }
 
-  async deleteUserKeepingAnActiveAdmin(id: string): Promise<boolean> {
+  async deleteUserKeepingAnActiveAdmin(id: string, newPipelineOwnerId: string): Promise<boolean> {
     return await this.prisma.$transaction(async (transaction) => {
       if (await this.wouldLeaveNoActiveAdmin(transaction, id)) return false;
+      await transaction.pipeline.updateMany({ where: { ownerId: id }, data: { ownerId: newPipelineOwnerId } });
       await transaction.user.delete({ where: { id } });
       return true;
     });
