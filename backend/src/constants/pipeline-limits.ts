@@ -1,0 +1,1 @@
+export const MAXIMUM_STAGES_PER_PIPELINE = 30;

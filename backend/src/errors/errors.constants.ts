@@ -1,3 +1,5 @@
+import { MAXIMUM_STAGES_PER_PIPELINE } from '@/constants/pipeline-limits';
+
 export const AUTH_ERRORS = {
   INVALID_CREDENTIALS: 'Credenciais inválidas',
   INVALID_SESSION: 'Sessão inválida ou expirada. Entre novamente.',
@@ -30,7 +32,6 @@ export const LEAD_IMPORT_ERRORS = {
   NOT_FOUND: 'Importação não encontrada',
   MISSING_FILE: 'Envie o arquivo CSV da planilha',
   NO_ROWS_TO_IMPORT: 'Nenhuma linha da planilha pode ser importada',
-  NO_PIPELINE_TO_RECEIVE_LEADS: 'Nenhum funil configurado para receber os leads',
   ALREADY_RUNNING: 'Você já tem uma importação em andamento. Aguarde ela terminar para enviar outra planilha.',
   NOT_RETRYABLE: 'Só uma importação interrompida pode ser retomada',
   REQUESTER_HAS_RUNNING_IMPORT: 'Quem enviou esta planilha já tem outra importação em andamento. Tente de novo quando ela terminar.',
@@ -47,6 +48,7 @@ export const PIPELINE_ERRORS = {
   MEMBER_NOT_FOUND: 'Esta pessoa não participa deste funil',
   STAGE_NOT_FOUND: 'Etapa não encontrada neste funil',
   LAST_STAGE: 'O funil precisa ter ao menos uma etapa',
+  TOO_MANY_STAGES: `O funil pode ter no máximo ${MAXIMUM_STAGES_PER_PIPELINE} etapas`,
   RECEIVING_STAGE_INVALID: 'Escolha outra etapa deste funil para receber os cartões',
   STAGE_ORDER_INVALID: 'Envie todas as etapas do funil, cada uma uma única vez',
   CARD_NOT_FOUND: 'Cartão não encontrado neste funil',

@@ -1,5 +1,6 @@
 import { NotificationType, Role } from '@prisma/client';
 import { PIPELINE_NOTIFICATION_MESSAGES } from '@/constants/notification-messages';
+import { MAXIMUM_STAGES_PER_PIPELINE } from '@/constants/pipeline-limits';
 import { BadRequestError, ForbiddenError, NotFoundError } from '@/errors/app-errors';
 import { LEAD_ERRORS, PIPELINE_ERRORS } from '@/errors/errors.constants';
 import type { Clock } from '@/infra/clock';
@@ -130,6 +131,8 @@ export class PipelineService implements IPipelineService {
 
   async createStage({ targetPipelineId, stage }: CreateStageRequest, loggedUserContext: LoggedUserContext): Promise<void> {
     await this.findAccessOrFail(targetPipelineId, loggedUserContext);
+    const stageIds = await this.pipelineRepository.findStageIds(targetPipelineId);
+    if (stageIds.length >= MAXIMUM_STAGES_PER_PIPELINE) throw new BadRequestError(PIPELINE_ERRORS.TOO_MANY_STAGES);
     await this.pipelineRepository.createStage(targetPipelineId, stage);
     await this.pipelineChanges.announce(targetPipelineId);
   }

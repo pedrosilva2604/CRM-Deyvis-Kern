@@ -15,11 +15,11 @@ import type {
   StageInput,
   UpdateStageInput,
 } from '@/models/pipeline.model';
+import { MAXIMUM_STAGES_PER_PIPELINE } from '@/constants/pipeline-limits';
 import { moneyValueSchema } from './lead.schema';
 
 const MAXIMUM_PIPELINE_NAME_LENGTH = 60;
 const MAXIMUM_STAGE_NAME_LENGTH = 40;
-const MAXIMUM_STAGES = 30;
 const MAXIMUM_CLOSING_NOTE_LENGTH = 500;
 const DEFAULT_CARDS_PER_PAGE = 50;
 const MAXIMUM_CARDS_PER_PAGE = 100;
@@ -91,7 +91,7 @@ export const updateStageSchema: ZodType<UpdateStageInput, ZodTypeDef, unknown> =
   .refine(notBothWonAndLost, WON_AND_LOST_MESSAGE);
 
 export const reorderStagesSchema: ZodType<ReorderStagesInput, ZodTypeDef, unknown> = z
-  .object({ stageIds: z.array(stageIdSchema).min(1).max(MAXIMUM_STAGES) })
+  .object({ stageIds: z.array(stageIdSchema).min(1).max(MAXIMUM_STAGES_PER_PIPELINE) })
   .strict('Campo não permitido');
 
 export const deleteStageQuerySchema: ZodType<DeleteStageQuery, ZodTypeDef, unknown> = z
