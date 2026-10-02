@@ -50,6 +50,7 @@ export const PIPELINE_ERRORS = {
   LAST_STAGE: 'O funil precisa ter ao menos uma etapa',
   TOO_MANY_STAGES: `O funil pode ter no máximo ${MAXIMUM_STAGES_PER_PIPELINE} etapas`,
   RECEIVING_STAGE_INVALID: 'Escolha outra etapa deste funil para receber os cartões',
+  RECEIVING_STAGE_NEEDS_WON_VALUE: 'Há cartões sem valor de venda nesta etapa. Escolha uma etapa que não seja de ganho para recebê-los',
   STAGE_ORDER_INVALID: 'Envie todas as etapas do funil, cada uma uma única vez',
   CARD_NOT_FOUND: 'Cartão não encontrado neste funil',
   LEAD_ALREADY_IN_PIPELINE: 'Este lead já está neste funil',

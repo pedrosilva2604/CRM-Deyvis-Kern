@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { NotFoundError } from '@/errors/app-errors';
-import { TestDatabase } from '@/testing/integration/test-database';
+import { TestDatabase, type TestPipeline } from '@/testing/integration/test-database';
 import { CARD_POSITION_GAP, PipelineCardRepository } from './pipeline-card.repository';
 import { PipelineRepository } from './pipeline.repository';
 import { UserRepository } from './user.repository';
@@ -93,6 +93,56 @@ describe('Excluir uma etapa', () => {
     await pipelines.deleteStageMovingCards(newStage, proposalStage);
 
     expect(await database.findLeadNamesInStageOrder(proposalStage)).toEqual(['Já estava', 'Primeiro', 'Segundo']);
+  });
+});
+
+describe('Excluir uma etapa ajusta o fechamento dos cartões à etapa que recebe', () => {
+  const closedOn = new Date('2026-09-01T12:00:00.000Z');
+  let funnel: TestPipeline;
+  let wonCard: string;
+
+  beforeEach(async () => {
+    const maria = await database.addUser('Maria');
+    funnel = await database.addPipeline(maria, ['Proposta', 'Ganho', 'Outro ganho', 'Perdido'], { wonStage: 'Ganho', lostStage: 'Perdido' });
+    await database.client.stage.update({ where: { id: funnel.stageIdByName['Outro ganho']! }, data: { isWon: true } });
+    const lead = await database.addLead({ name: 'Vendido', phone: '+5511900000001' });
+    wonCard = await database.addCard(funnel.pipelineId, funnel.stageIdByName['Ganho']!, lead, 1024);
+    await database.client.pipelineCard.update({
+      where: { id: wonCard },
+      data: { wonValue: '1500.00', closingNote: 'Pagou à vista', closedAt: closedOn },
+    });
+  });
+
+  it('indo para uma etapa aberta, deixa de parecer vendido', async () => {
+    await pipelines.deleteStageMovingCards(funnel.stageIdByName['Ganho']!, funnel.stageIdByName['Proposta']!);
+
+    expect(await database.findCard(wonCard)).toMatchObject({ wonValue: null, closingNote: null, closedAt: null });
+  });
+
+  it('indo para Perdido, perde o valor, mantém a anotação e fecha agora', async () => {
+    await pipelines.deleteStageMovingCards(funnel.stageIdByName['Ganho']!, funnel.stageIdByName['Perdido']!);
+
+    const card = await database.findCard(wonCard);
+    expect(card).toMatchObject({ wonValue: null, closingNote: 'Pagou à vista' });
+    expect(card.closedAt!.getTime()).toBeGreaterThan(closedOn.getTime());
+  });
+
+  it('indo de um Ganho para outro, mantém valor, anotação e data', async () => {
+    await pipelines.deleteStageMovingCards(funnel.stageIdByName['Ganho']!, funnel.stageIdByName['Outro ganho']!);
+
+    const card = await database.findCard(wonCard);
+    expect(card.wonValue?.toFixed(2)).toBe('1500.00');
+    expect(card).toMatchObject({ closingNote: 'Pagou à vista', closedAt: closedOn });
+  });
+
+  it('não leva para Ganho cartão sem valor de venda, e não muda nada', async () => {
+    const lead = await database.addLead({ name: 'Negociando', phone: '+5511900000002' });
+    const openCard = await database.addCard(funnel.pipelineId, funnel.stageIdByName['Proposta']!, lead, 1024);
+
+    const outcome = await pipelines.deleteStageMovingCards(funnel.stageIdByName['Proposta']!, funnel.stageIdByName['Ganho']!);
+
+    expect(outcome).toBe('cardsWithoutWonValue');
+    expect(await database.findCard(openCard)).toMatchObject({ stageId: funnel.stageIdByName['Proposta']! });
   });
 });
 

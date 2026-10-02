@@ -176,7 +176,9 @@ export class PipelineService implements IPipelineService {
       throw new BadRequestError(PIPELINE_ERRORS.RECEIVING_STAGE_INVALID);
     }
 
-    await this.pipelineRepository.deleteStageMovingCards(targetStageId, moveCardsToStageId);
+    const stageDeletion = await this.pipelineRepository.deleteStageMovingCards(targetStageId, moveCardsToStageId);
+    if (stageDeletion === 'stageNotFound') throw new NotFoundError(PIPELINE_ERRORS.STAGE_NOT_FOUND);
+    if (stageDeletion === 'cardsWithoutWonValue') throw new BadRequestError(PIPELINE_ERRORS.RECEIVING_STAGE_NEEDS_WON_VALUE);
     await this.recordPipelineAuditLog(loggedUserContext, 'pipeline.stage_delete', targetPipelineId, {
       stageId: targetStageId,
       cardsMovedToStageId: moveCardsToStageId,

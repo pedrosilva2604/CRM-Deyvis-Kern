@@ -1,4 +1,4 @@
-import { Role } from '@prisma/client';
+import { Prisma, Role } from '@prisma/client';
 import { DEFAULT_PIPELINE_STAGES } from '@/constants/default-pipeline';
 import {
   pipelineOutputRelations,
@@ -35,7 +35,15 @@ export interface IPipelineRepository {
   createStage(pipelineId: string, stage: StageInput): Promise<void>;
   updateStage(stageId: string, stageChanges: UpdateStageInput): Promise<void>;
   reorderStages(orderedStageIds: string[]): Promise<void>;
-  deleteStageMovingCards(stageId: string, receivingStageId: string): Promise<void>;
+  deleteStageMovingCards(stageId: string, receivingStageId: string): Promise<StageDeletionOutcome>;
+}
+
+export type StageDeletionOutcome = 'deleted' | 'stageNotFound' | 'cardsWithoutWonValue';
+
+interface StageClosingKind {
+  id: string;
+  isWon: boolean;
+  isLost: boolean;
 }
 
 const STAGE_POSITION_GAP = 1;
@@ -160,12 +168,34 @@ export class PipelineRepository implements IPipelineRepository {
     );
   }
 
-  async deleteStageMovingCards(stageId: string, receivingStageId: string): Promise<void> {
-    await this.prisma.$transaction(async (transaction) => {
-      await lockStagesForCardPlacement(transaction, [stageId, receivingStageId]);
-      await this.appendCardsToStage(transaction, stageId, receivingStageId);
+  async deleteStageMovingCards(stageId: string, receivingStageId: string): Promise<StageDeletionOutcome> {
+    return await this.prisma.$transaction(async (transaction) => {
+      const lockedStageIds = await lockStagesForCardPlacement(transaction, [stageId, receivingStageId]);
+      if (lockedStageIds.length < 2) return 'stageNotFound';
+      const [deletedStage, receivingStage] = await this.findClosingKindsOf(transaction, stageId, receivingStageId);
+      if (receivingStage.isWon && (await this.hasCardsWithoutWonValue(transaction, stageId))) return 'cardsWithoutWonValue';
+
+      await this.appendCardsToStage(transaction, deletedStage, receivingStage);
       await transaction.stage.delete({ where: { id: stageId } });
+      return 'deleted';
     });
+  }
+
+  private async findClosingKindsOf(
+    transaction: DatabaseTransaction,
+    stageId: string,
+    receivingStageId: string,
+  ): Promise<[StageClosingKind, StageClosingKind]> {
+    const stages = await transaction.stage.findMany({
+      where: { id: { in: [stageId, receivingStageId] } },
+      select: { id: true, isWon: true, isLost: true },
+    });
+    const findStage = (id: string) => stages.find((stage) => stage.id === id)!;
+    return [findStage(stageId), findStage(receivingStageId)];
+  }
+
+  private async hasCardsWithoutWonValue(transaction: DatabaseTransaction, stageId: string): Promise<boolean> {
+    return (await transaction.pipelineCard.count({ where: { stageId, wonValue: null } })) > 0;
   }
 
   private async findStageIdsInside(transaction: DatabaseTransaction, pipelineId: string): Promise<string[]> {
@@ -173,16 +203,24 @@ export class PipelineRepository implements IPipelineRepository {
     return stages.map(({ id }) => id);
   }
 
-  private async appendCardsToStage(transaction: DatabaseTransaction, fromStageId: string, toStageId: string): Promise<void> {
-    const lastCard = await transaction.pipelineCard.findFirst({ where: { stageId: toStageId }, orderBy: { position: 'desc' } });
+  private async appendCardsToStage(transaction: DatabaseTransaction, fromStage: StageClosingKind, toStage: StageClosingKind): Promise<void> {
+    const lastCard = await transaction.pipelineCard.findFirst({ where: { stageId: toStage.id }, orderBy: { position: 'desc' } });
     const lastPosition = lastCard?.position ?? 0;
     await transaction.$executeRaw`
       UPDATE "PipelineCard" AS card
-      SET "stageId" = ${toStageId}::uuid, "position" = ${lastPosition} + ${CARD_POSITION_GAP} * ordered."rowNumber", "updatedAt" = now()
+      SET "stageId" = ${toStage.id}::uuid, "position" = ${lastPosition} + ${CARD_POSITION_GAP} * ordered."rowNumber", "updatedAt" = now()${this.closingChangesFor(fromStage, toStage)}
       FROM (
         SELECT "id", ROW_NUMBER() OVER (ORDER BY "position" ASC, "id" ASC) AS "rowNumber"
-        FROM "PipelineCard" WHERE "stageId" = ${fromStageId}::uuid
+        FROM "PipelineCard" WHERE "stageId" = ${fromStage.id}::uuid
       ) AS ordered
       WHERE card."id" = ordered."id"`;
+  }
+
+  private closingChangesFor(fromStage: StageClosingKind, toStage: StageClosingKind): Prisma.Sql {
+    if (toStage.isWon) return fromStage.isWon ? Prisma.empty : Prisma.sql`, "closedAt" = now()`;
+    if (toStage.isLost) {
+      return fromStage.isLost ? Prisma.sql`, "wonValue" = NULL` : Prisma.sql`, "wonValue" = NULL, "closedAt" = now()`;
+    }
+    return Prisma.sql`, "wonValue" = NULL, "closingNote" = NULL, "closedAt" = NULL`;
   }
 }
