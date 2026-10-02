@@ -124,7 +124,7 @@ export function LeadsPage() {
       {selectedLeadId && <LeadDetailsDrawer leadId={selectedLeadId} onClose={closeLeadDetails} />}
       {isImportDialogOpen && <ImportLeadsDialog onClose={() => setIsImportDialogOpen(false)} />}
       {trackedImportId && !isImportDialogOpen && (
-        <ImportLeadsDialog importIdToTrack={trackedImportId} onClose={stopTrackingImport} />
+        <ImportLeadsDialog key={trackedImportId} importIdToTrack={trackedImportId} onClose={stopTrackingImport} />
       )}
     </>
   );
