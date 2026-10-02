@@ -20,6 +20,22 @@ function newImportRequestedBy(requestedById: string) {
   };
 }
 
+const DISPUTES_TO_CATCH_A_DEADLOCK = 15;
+
+function chunkWithRows(
+  importId: string,
+  rows: { phone: string; email: string }[],
+  { importedBy }: { importedBy: 'admin' | 'seller' },
+): LeadImportChunk {
+  return {
+    ...chunkOf(importId, rows.map((row) => row.phone), { importedBy }),
+    leadsToCreate: leadsToCreateFrom(rows.map((row) => row.phone), database.funnel).map((lead, rowIndex) => ({
+      ...lead,
+      email: rows[rowIndex]!.email,
+    })),
+  };
+}
+
 function chunkOf(importId: string, phones: string[], { importedBy }: { importedBy: 'admin' | 'seller' }): LeadImportChunk {
   return {
     importId,
@@ -104,6 +120,72 @@ describe('Telefones de leads excluídos na importação', () => {
       skippedExistingLeads: 1,
       restoredLeads: 0,
     });
+  });
+});
+
+describe('Lead excluído reconhecido pelo e-mail na importação', () => {
+  it('importação de ADMIN restaura o lead excluído que tem o e-mail da linha, mesmo com telefone novo', async () => {
+    const ana = await database.addUser('Ana', { role: 'ADMIN' });
+    await database.addLead({ name: 'João excluído', phone: '+5511900000001', email: 'joao@empresa.com', deleted: true });
+    const importId = await database.addLeadImport({ requestedById: ana, status: 'PROCESSING' });
+
+    const chunkResult = await leadImports.importChunk(
+      chunkWithRows(importId, [{ phone: '+5511900000099', email: 'joao@empresa.com' }], { importedBy: 'admin' }),
+    );
+
+    expect(chunkResult).toEqual({ insertedLeads: 0, restoredLeads: 1, skippedDeletedLeads: 0 });
+    expect(await database.findLeadByPhone('+5511900000001')).toMatchObject({ name: 'João excluído', deletedAt: null });
+  });
+
+  it('importação de vendedor conta a linha como "pertence a lead excluído", e não como "já existia"', async () => {
+    const maria = await database.addUser('Maria');
+    await database.addLead({ name: 'João excluído', phone: '+5511900000001', email: 'joao@empresa.com', deleted: true });
+    const importId = await database.addLeadImport({ requestedById: maria, status: 'PROCESSING' });
+
+    await leadImports.importChunk(chunkWithRows(importId, [{ phone: '+5511900000099', email: 'joao@empresa.com' }], { importedBy: 'seller' }));
+
+    expect(await database.findLeadImport(importId)).toMatchObject({ skippedDeletedLeads: 1, skippedExistingLeads: 0 });
+  });
+
+  it('telefone de lead ativo e e-mail de lead excluído: conta como "já existia" e não restaura ninguém', async () => {
+    const ana = await database.addUser('Ana', { role: 'ADMIN' });
+    await database.addLead({ name: 'Maria ativa', phone: '+5511900000001' });
+    await database.addLead({ name: 'João excluído', phone: '+5511900000002', email: 'joao@empresa.com', deleted: true });
+    const importId = await database.addLeadImport({ requestedById: ana, status: 'PROCESSING' });
+
+    const chunkResult = await leadImports.importChunk(
+      chunkWithRows(importId, [{ phone: '+5511900000001', email: 'joao@empresa.com' }], { importedBy: 'admin' }),
+    );
+
+    expect(chunkResult).toEqual({ insertedLeads: 0, restoredLeads: 0, skippedDeletedLeads: 0 });
+    expect(await database.findLeadImport(importId)).toMatchObject({ skippedExistingLeads: 1 });
+    expect(await database.findLeadByPhone('+5511900000002')).toMatchObject({ deletedAt: expect.any(Date) });
+  });
+});
+
+describe('Duas importações gravando os mesmos telefones ao mesmo tempo', () => {
+  it('a de ADMIN restaurando e a de vendedor inserindo terminam as duas, sem deadlock (em 15 disputas)', async () => {
+    const phones = Array.from({ length: 40 }, (_, phoneIndex) => `+55119000${String(phoneIndex).padStart(5, '0')}`);
+    const deletedPhones = phones.filter((_, phoneIndex) => phoneIndex % 2 === 1);
+    const failures: string[] = [];
+
+    for (let dispute = 1; dispute <= DISPUTES_TO_CATCH_A_DEADLOCK; dispute += 1) {
+      await database.prepareEmptyDatabase();
+      for (const phone of deletedPhones) await database.addLead({ name: `Excluído ${phone}`, phone, deleted: true });
+      const ana = await database.addUser('Ana', { role: 'ADMIN' });
+      const maria = await database.addUser('Maria');
+      const adminImport = await database.addLeadImport({ requestedById: ana, status: 'PROCESSING' });
+      const sellerImport = await database.addLeadImport({ requestedById: maria, status: 'PROCESSING' });
+
+      const outcomes = await Promise.allSettled([
+        leadImports.importChunk(chunkOf(adminImport, phones, { importedBy: 'admin' })),
+        leadImports.importChunk(chunkOf(sellerImport, phones, { importedBy: 'seller' })),
+      ]);
+
+      outcomes.forEach((outcome) => outcome.status === 'rejected' && failures.push(String(outcome.reason).split('\n')[0]!));
+    }
+
+    expect(failures).toEqual([]);
   });
 });
 

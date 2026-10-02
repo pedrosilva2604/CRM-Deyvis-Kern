@@ -1,4 +1,4 @@
-import { LeadImportStatus } from '@prisma/client';
+import { LeadImportStatus, Prisma } from '@prisma/client';
 import {
   toFinishedLeadImport,
   toLeadImportProgress,
@@ -11,7 +11,7 @@ import {
   type LeadImportRowToProcess,
   type LeadImportToProcess,
 } from '@/models/lead-import.model';
-import type { DatabaseClient } from '@/repositories/database-client';
+import type { DatabaseClient, DatabaseTransaction } from '@/repositories/database-client';
 
 export interface ILeadImportRepository {
   createLeadImport(newLeadImport: CreateLeadImportData): Promise<string>;
@@ -31,6 +31,24 @@ export interface ILeadImportRepository {
 }
 
 const RUNNING_LEAD_IMPORT_STATUSES = [LeadImportStatus.PENDING, LeadImportStatus.PROCESSING];
+
+interface LeadContactRecord {
+  phone: string;
+  email: string | null;
+}
+
+interface DeletedLeadContactRecord extends LeadContactRecord {
+  id: string;
+}
+
+interface RowsHeldByDeletedLeads {
+  rowCount: number;
+  deletedLeadIds: string[];
+}
+
+function holdsContactOf(lead: LeadContactRecord, row: LeadImportRowToProcess): boolean {
+  return lead.phone === row.phone || (row.email !== null && lead.email === row.email);
+}
 
 export class LeadImportChunkAlreadyProcessedError extends Error {
   constructor(importId: string) {
@@ -97,26 +115,34 @@ export class LeadImportRepository implements ILeadImportRepository {
 
   async importChunk({ importId, processedRowsBefore, restoresDeletedLeads, leadsToCreate }: LeadImportChunk): Promise<LeadImportChunkResult> {
     return await this.prisma.$transaction(async (transaction) => {
-      const deletedLeadsOfChunk = { phone: { in: leadsToCreate.map((lead) => lead.phone) }, deletedAt: { not: null } };
-      const restoredLeads = restoresDeletedLeads
-        ? (await transaction.lead.updateMany({ where: deletedLeadsOfChunk, data: { deletedAt: null } })).count
-        : 0;
-      const skippedDeletedLeads = restoresDeletedLeads ? 0 : await transaction.lead.count({ where: deletedLeadsOfChunk });
-      const insertion = await transaction.lead.createMany({ data: leadsToCreate, skipDuplicates: true });
-      const skippedExistingLeads = leadsToCreate.length - insertion.count - restoredLeads - skippedDeletedLeads;
+      const insertedLeads = await transaction.lead.createManyAndReturn({
+        data: leadsToCreate,
+        skipDuplicates: true,
+        select: { phone: true },
+      });
+      const insertedPhones = new Set(insertedLeads.map((insertedLead) => insertedLead.phone));
+      const rowsNotInserted = leadsToCreate.filter((row) => !insertedPhones.has(row.phone));
+      const rowsHeldOnlyByDeletedLeads = await this.findRowsHeldOnlyByDeletedLeads(transaction, rowsNotInserted, restoresDeletedLeads);
+      if (restoresDeletedLeads) await this.restoreDeletedLeads(transaction, rowsHeldOnlyByDeletedLeads.deletedLeadIds);
 
+      const rowsOfDeletedLeads = rowsHeldOnlyByDeletedLeads.rowCount;
+      const chunkResult: LeadImportChunkResult = {
+        insertedLeads: insertedLeads.length,
+        restoredLeads: restoresDeletedLeads ? rowsOfDeletedLeads : 0,
+        skippedDeletedLeads: restoresDeletedLeads ? 0 : rowsOfDeletedLeads,
+      };
       const advanced = await transaction.leadImport.updateMany({
         where: { id: importId, status: LeadImportStatus.PROCESSING, processedRows: processedRowsBefore },
         data: {
           processedRows: processedRowsBefore + leadsToCreate.length,
-          importedLeads: { increment: insertion.count },
-          skippedExistingLeads: { increment: skippedExistingLeads },
-          restoredLeads: { increment: restoredLeads },
-          skippedDeletedLeads: { increment: skippedDeletedLeads },
+          importedLeads: { increment: chunkResult.insertedLeads },
+          skippedExistingLeads: { increment: rowsNotInserted.length - rowsOfDeletedLeads },
+          restoredLeads: { increment: chunkResult.restoredLeads },
+          skippedDeletedLeads: { increment: chunkResult.skippedDeletedLeads },
         },
       });
       if (advanced.count === 0) throw new LeadImportChunkAlreadyProcessedError(importId);
-      return { insertedLeads: insertion.count, restoredLeads, skippedDeletedLeads };
+      return chunkResult;
     });
   }
 
@@ -200,6 +226,40 @@ export class LeadImportRepository implements ILeadImportRepository {
       data: { expiryWarningSentAt: sentAt },
     });
     return warning.count === 0 ? null : await this.findFinishedLeadImport(importId, sentAt);
+  }
+
+  private async findRowsHeldOnlyByDeletedLeads(
+    transaction: DatabaseTransaction,
+    rowsNotInserted: LeadImportRowToProcess[],
+    locksDeletedLeads: boolean,
+  ): Promise<RowsHeldByDeletedLeads> {
+    if (rowsNotInserted.length === 0) return { rowCount: 0, deletedLeadIds: [] };
+    const phones = rowsNotInserted.map((row) => row.phone);
+    const emails = rowsNotInserted.flatMap((row) => (row.email ? [row.email] : []));
+    const activeLeads = await transaction.lead.findMany({
+      where: { deletedAt: null, OR: [{ phone: { in: phones } }, { email: { in: emails } }] },
+      select: { phone: true, email: true },
+    });
+    const deletedLeads = await transaction.$queryRaw<DeletedLeadContactRecord[]>`
+      SELECT "id", "phone", "email" FROM "Lead"
+      WHERE "deletedAt" IS NOT NULL AND ("phone" = ANY(${phones}::text[]) OR "email" = ANY(${emails}::text[]))
+      ORDER BY "phone" ${locksDeletedLeads ? Prisma.sql`FOR UPDATE` : Prisma.empty}`;
+
+    const deletedLeadIds = new Set<string>();
+    let rowCount = 0;
+    for (const row of rowsNotInserted) {
+      if (activeLeads.some((activeLead) => holdsContactOf(activeLead, row))) continue;
+      const deletedHolders = deletedLeads.filter((deletedLead) => holdsContactOf(deletedLead, row));
+      if (deletedHolders.length === 0) continue;
+      rowCount += 1;
+      deletedHolders.forEach((deletedLead) => deletedLeadIds.add(deletedLead.id));
+    }
+    return { rowCount, deletedLeadIds: [...deletedLeadIds] };
+  }
+
+  private async restoreDeletedLeads(transaction: DatabaseTransaction, deletedLeadIds: string[]): Promise<void> {
+    if (deletedLeadIds.length === 0) return;
+    await transaction.lead.updateMany({ where: { id: { in: deletedLeadIds } }, data: { deletedAt: null } });
   }
 
   private async findFinishedLeadImport(importId: string, finishedAt: Date): Promise<FinishedLeadImport | null> {
