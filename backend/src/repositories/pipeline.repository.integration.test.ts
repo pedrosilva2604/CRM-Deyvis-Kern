@@ -90,6 +90,17 @@ describe('Excluir uma etapa', () => {
   });
 });
 
+describe('Excluir um funil', () => {
+  it('a importação que mirava o funil continua no histórico, só sem destino', async () => {
+    const maria = await database.addUser('Maria');
+    const importId = await database.addLeadImport({ requestedById: maria, status: 'PROCESSING', intoTestFunnel: true });
+
+    await pipelines.deletePipeline(database.funnel.pipelineId);
+
+    expect(await database.findLeadImport(importId)).toMatchObject({ pipelineId: null, stageId: null });
+  });
+});
+
 describe('Funil de cada usuário', () => {
   it('quem é cadastrado já ganha um funil com as 5 etapas padrão', async () => {
     const joao = await users.createUser({ name: 'João', email: 'joao@teste.local', passwordHash: 'x', role: 'AGENT' });

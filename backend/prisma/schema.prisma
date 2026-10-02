@@ -249,9 +249,9 @@ model LeadImport {
   alreadyInPipelineLeads Int              @default(0)
   processedRows          Int              @default(0)
   pipelineId             String?          @db.Uuid
-  pipeline               Pipeline?        @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  pipeline               Pipeline?        @relation(fields: [pipelineId], references: [id], onDelete: SetNull)
   stageId                String?          @db.Uuid
-  stage                  Stage?           @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  stage                  Stage?           @relation(fields: [stageId], references: [id], onDelete: SetNull)
   requestedById          String?          @db.Uuid
   requestedBy            User?            @relation(fields: [requestedById], references: [id], onDelete: SetNull)
   failureReason          String?
