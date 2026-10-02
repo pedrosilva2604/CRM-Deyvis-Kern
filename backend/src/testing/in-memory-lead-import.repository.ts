@@ -17,7 +17,7 @@ import type {
 export interface StoredLeadImport {
   importId: string;
   status: LeadImportStatus;
-  requestedById: string | null;
+  requestedById: string;
   pipelineId: string | null;
   stageId: string | null;
   rows: LeadImportRowToProcess[];

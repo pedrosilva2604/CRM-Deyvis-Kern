@@ -12,7 +12,7 @@ export interface NewCard {
   pipelineId: string;
   stageId: string;
   leadId: string;
-  addedById: string | null;
+  addedById: string;
 }
 
 export interface CardDestination {

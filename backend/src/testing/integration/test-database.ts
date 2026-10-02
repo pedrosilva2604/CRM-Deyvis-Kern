@@ -168,12 +168,21 @@ export class TestDatabase {
   }
 
   async addMember(pipelineId: string, userId: string): Promise<void> {
-    await this.client.pipelineMember.create({ data: { pipelineId, userId } });
+    const addedById = await this.findOwnerOf(pipelineId);
+    await this.client.pipelineMember.create({ data: { pipelineId, userId, addedById } });
   }
 
-  async addCard(pipelineId: string, stageId: string, leadId: string, position: number): Promise<string> {
-    const card = await this.client.pipelineCard.create({ data: { pipelineId, stageId, leadId, position }, select: { id: true } });
+  async addCard(pipelineId: string, stageId: string, leadId: string, position: number, addedById?: string): Promise<string> {
+    const card = await this.client.pipelineCard.create({
+      data: { pipelineId, stageId, leadId, position, addedById: addedById ?? (await this.findOwnerOf(pipelineId)) },
+      select: { id: true },
+    });
     return card.id;
+  }
+
+  private async findOwnerOf(pipelineId: string): Promise<string> {
+    const pipeline = await this.client.pipeline.findUniqueOrThrow({ where: { id: pipelineId }, select: { ownerId: true } });
+    return pipeline.ownerId;
   }
 
   async findLeadNamesInStageOrder(stageId: string): Promise<string[]> {

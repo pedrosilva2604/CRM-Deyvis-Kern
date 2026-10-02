@@ -15,6 +15,7 @@ import type {
 } from '@/models/user.model';
 import type { IUserRepository } from '@/repositories/user.repository';
 import type { IAuditService } from './audit.service';
+import type { Clock } from '@/infra/clock';
 import type { IPasswordHasher } from '@/infra/password-hasher';
 import type { ISessionService } from './session.service';
 
@@ -38,6 +39,7 @@ export class UserService implements IUserService, IUserPasswordUpdater {
     private readonly hasher: IPasswordHasher,
     private readonly sessions: ISessionService,
     private readonly audit: IAuditService,
+    private readonly clock: Clock,
   ) {}
 
   async registerUser(newUserRegistration: RegisterUserInput, loggedUserContext: LoggedUserContext): Promise<RegisteredUserOutput> {
@@ -120,7 +122,11 @@ export class UserService implements IUserService, IUserPasswordUpdater {
     const targetUser = await this.findExistingUserOrFail(targetUserId);
     this.assertIsNotSelf(targetUser, loggedUserContext);
 
-    const wasDeleted = await this.userRepository.deleteUserKeepingAnActiveAdmin(targetUserId, loggedUserContext.loggedUser.id);
+    const wasDeleted = await this.userRepository.deleteUserKeepingAnActiveAdmin(
+      targetUserId,
+      loggedUserContext.loggedUser.id,
+      this.clock.now(),
+    );
     if (!wasDeleted) throw new BadRequestError(USER_ERRORS.LAST_ADMIN);
     this.sessions.notifyAllUserSessionsEnded(targetUserId);
     await this.recordUserAuditLog(loggedUserContext, 'user.delete', targetUserId, {

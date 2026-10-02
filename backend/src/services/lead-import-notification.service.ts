@@ -62,7 +62,6 @@ export class LeadImportNotificationService implements ILeadImportNotificationSer
     title: string,
     message: string,
   ): Promise<void> {
-    if (!finishedImport.requestedById) return;
     await this.notificationService.notifyUser(finishedImport.requestedById, {
       type,
       title,

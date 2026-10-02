@@ -60,7 +60,6 @@ export class LeadImportProcessingService implements ILeadImportProcessingService
   }
 
   private async publishProgressToRequester(leadImport: LeadImportToProcess, counters: LeadImportCounters): Promise<void> {
-    if (!leadImport.requestedById) return;
     await this.realtimePublisher.publishToUser(leadImport.requestedById, REALTIME_EVENTS.LEAD_IMPORT_PROGRESS, {
       importId: leadImport.importId,
       ...counters,

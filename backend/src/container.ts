@@ -111,7 +111,7 @@ const sessionService = new SessionService(
   sessionTerminationBroadcaster,
 );
 const authService = new AuthService(userRepository, passwordHasher, sessionService, auditService);
-const userService = new UserService(userRepository, passwordHasher, sessionService, auditService);
+const userService = new UserService(userRepository, passwordHasher, sessionService, auditService, clock);
 const passwordResetService = new PasswordResetService(
   userRepository,
   passwordResetTokenRepository,

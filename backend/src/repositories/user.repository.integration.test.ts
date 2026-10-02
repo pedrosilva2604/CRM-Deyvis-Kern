@@ -34,7 +34,7 @@ describe('Sempre sobra um administrador ativo', () => {
   it('não exclui o último admin ativo', async () => {
     const ana = await database.addUser('Ana', { role: 'ADMIN' });
 
-    expect(await users.deleteUserKeepingAnActiveAdmin(ana, ana)).toBe(false);
+    expect(await users.deleteUserKeepingAnActiveAdmin(ana, ana, new Date())).toBe(false);
     expect(await database.countActiveAdmins()).toBe(1);
   });
 
@@ -73,6 +73,42 @@ describe('Sempre sobra um administrador ativo', () => {
 
     expect(await database.findUser(bruno)).toMatchObject({ active: false });
     expect(await database.countOpenSessionsOf(bruno)).toBe(0);
+  });
+});
+
+describe('Excluir um usuário guarda o histórico', () => {
+  it('o usuário continua no banco, sem acesso, e o cartão continua dizendo quem o adicionou', async () => {
+    const ana = await database.addUser('Ana', { role: 'ADMIN' });
+    const joao = await database.addUser('João');
+    const emailOfJoao = (await database.findUser(joao)).email;
+    const funnelOfAna = await database.addPipeline(ana, ['Novo lead']);
+    await database.addMember(funnelOfAna.pipelineId, joao);
+    const leadOfJoao = await database.addLead({ name: 'Cliente', phone: '+5511900000001' });
+    const cardAddedByJoao = await database.addCard(funnelOfAna.pipelineId, funnelOfAna.stageIdByName['Novo lead']!, leadOfJoao, 1024, joao);
+    await database.addOpenSession(joao);
+    const deletedAt = new Date('2026-10-02T15:00:00.000Z');
+
+    expect(await users.deleteUserKeepingAnActiveAdmin(joao, ana, deletedAt)).toBe(true);
+
+    expect(await database.findUser(joao)).toMatchObject({ active: false, deletedAt });
+    expect(await database.findCard(cardAddedByJoao)).toMatchObject({ addedById: joao });
+    expect(await database.client.pipelineMember.count({ where: { userId: joao } })).toBe(0);
+    expect(await database.countOpenSessionsOf(joao)).toBe(0);
+    expect((await users.findAllUsers()).map((user) => user.id)).not.toContain(joao);
+    expect(await users.findUserById(joao)).toBeNull();
+    expect(await users.findUserCredentialsByEmail(emailOfJoao)).toBeNull();
+  });
+
+  it('o e-mail de quem foi excluído continua reservado', async () => {
+    const ana = await database.addUser('Ana', { role: 'ADMIN' });
+    const joao = await database.addUser('João');
+    const emailOfJoao = (await database.findUser(joao)).email;
+    await users.deleteUserKeepingAnActiveAdmin(joao, ana, new Date());
+
+    const reuse = users.createUser({ name: 'Outro João', email: emailOfJoao, passwordHash: 'x', role: 'AGENT' });
+
+    await expect(reuse).rejects.toBeInstanceOf(ConflictError);
+    await expect(reuse).rejects.toThrow(USER_ERRORS.EMAIL_IN_USE);
   });
 });
 

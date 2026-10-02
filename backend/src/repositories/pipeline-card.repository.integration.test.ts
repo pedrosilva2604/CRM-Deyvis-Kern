@@ -8,6 +8,7 @@ const database = new TestDatabase();
 const cards = new PipelineCardRepository(database.client);
 const keepClosing = undefined;
 
+let maria: string;
 let funnel: TestPipeline;
 let newStage: string;
 let proposalStage: string;
@@ -19,7 +20,7 @@ async function addLeadWithCard(name: string, phone: string, stageId: string, pos
 
 beforeEach(async () => {
   await database.prepareEmptyDatabase();
-  const maria = await database.addUser('Maria');
+  maria = await database.addUser('Maria');
   funnel = await database.addPipeline(maria, ['Novo lead', 'Proposta']);
   newStage = funnel.stageIdByName['Novo lead']!;
   proposalStage = funnel.stageIdByName['Proposta']!;
@@ -34,7 +35,7 @@ describe('Adicionar lead da base ao funil', () => {
     await addLeadWithCard('Ana', '+5511900000001', newStage, 1024);
     const bruno = await database.addLead({ name: 'Bruno', phone: '+5511900000002' });
 
-    await cards.addCardOnTop({ pipelineId: funnel.pipelineId, stageId: newStage, leadId: bruno, addedById: null });
+    await cards.addCardOnTop({ pipelineId: funnel.pipelineId, stageId: newStage, leadId: bruno, addedById: maria });
 
     expect(await database.findLeadNamesInStageOrder(newStage)).toEqual(['Bruno', 'Ana']);
   });
@@ -46,7 +47,7 @@ describe('Adicionar lead da base ao funil', () => {
       ),
     );
 
-    await Promise.all(leadIds.map((leadId) => cards.addCardOnTop({ pipelineId: funnel.pipelineId, stageId: newStage, leadId, addedById: null })));
+    await Promise.all(leadIds.map((leadId) => cards.addCardOnTop({ pipelineId: funnel.pipelineId, stageId: newStage, leadId, addedById: maria })));
 
     const positions = await database.findCardPositionsOfStage(newStage);
     expect(new Set(positions).size).toBe(leadIds.length);
@@ -54,9 +55,9 @@ describe('Adicionar lead da base ao funil', () => {
 
   it('não deixa o mesmo lead entrar duas vezes no mesmo funil', async () => {
     const ana = await database.addLead({ name: 'Ana', phone: '+5511900000001' });
-    await cards.addCardOnTop({ pipelineId: funnel.pipelineId, stageId: newStage, leadId: ana, addedById: null });
+    await cards.addCardOnTop({ pipelineId: funnel.pipelineId, stageId: newStage, leadId: ana, addedById: maria });
 
-    const secondTime = cards.addCardOnTop({ pipelineId: funnel.pipelineId, stageId: proposalStage, leadId: ana, addedById: null });
+    const secondTime = cards.addCardOnTop({ pipelineId: funnel.pipelineId, stageId: proposalStage, leadId: ana, addedById: maria });
 
     await expect(secondTime).rejects.toBeInstanceOf(ConflictError);
     await expect(secondTime).rejects.toThrow(PIPELINE_ERRORS.LEAD_ALREADY_IN_PIPELINE);
@@ -66,9 +67,9 @@ describe('Adicionar lead da base ao funil', () => {
     const joao = await database.addUser('João');
     const funnelOfJoao = await database.addPipeline(joao, ['Novo lead']);
     const ana = await database.addLead({ name: 'Ana', phone: '+5511900000001' });
-    await cards.addCardOnTop({ pipelineId: funnel.pipelineId, stageId: newStage, leadId: ana, addedById: null });
+    await cards.addCardOnTop({ pipelineId: funnel.pipelineId, stageId: newStage, leadId: ana, addedById: maria });
 
-    await cards.addCardOnTop({ pipelineId: funnelOfJoao.pipelineId, stageId: funnelOfJoao.stageIdByName['Novo lead']!, leadId: ana, addedById: null });
+    await cards.addCardOnTop({ pipelineId: funnelOfJoao.pipelineId, stageId: funnelOfJoao.stageIdByName['Novo lead']!, leadId: ana, addedById: maria });
 
     expect(await database.findLeadNamesInStageOrder(funnelOfJoao.stageIdByName['Novo lead']!)).toEqual(['Ana']);
   });

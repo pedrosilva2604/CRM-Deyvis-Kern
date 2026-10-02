@@ -44,7 +44,7 @@ function chunkOf(importId: string, phones: string[], { importedBy }: { importedB
     processedRowsBefore: 0,
     restoresDeletedLeads: importedBy === 'admin',
     destination: null,
-    addedById: null,
+    addedById: database.funnel.ownerId,
     leadsToCreate: leadsToCreateFrom(phones),
   };
 }

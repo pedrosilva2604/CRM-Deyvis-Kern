@@ -25,9 +25,11 @@ export interface IUserRepository {
   updateUserTheme(id: string, theme: Theme): Promise<UserOutput>;
   activateUser(id: string): Promise<RegisteredUserOutput>;
   deactivateUserKeepingAnActiveAdmin(id: string): Promise<RegisteredUserOutput | null>;
-  deleteUserKeepingAnActiveAdmin(id: string, newPipelineOwnerId: string): Promise<boolean>;
+  deleteUserKeepingAnActiveAdmin(id: string, newPipelineOwnerId: string, deletedAt: Date): Promise<boolean>;
   replaceUserPassword(id: string, passwordHash: string, resetTokenToConsume: string | null): Promise<boolean>;
 }
+
+const notDeletedUsers = { deletedAt: null };
 
 function isRemovingAdminRole(data: UpdateUserData): boolean {
   return data.role !== undefined && data.role !== Role.ADMIN;
@@ -47,22 +49,22 @@ export class UserRepository implements IUserRepository {
   }
 
   async findAllUsers(): Promise<RegisteredUserOutput[]> {
-    const users = await this.prisma.user.findMany({ orderBy: { name: 'asc' } });
+    const users = await this.prisma.user.findMany({ where: notDeletedUsers, orderBy: { name: 'asc' } });
     return users.map(toRegisteredUserOutput);
   }
 
   async findUserById(id: string): Promise<RegisteredUserOutput | null> {
-    const user = await this.prisma.user.findUnique({ where: { id } });
+    const user = await this.prisma.user.findFirst({ where: { id, ...notDeletedUsers } });
     return user ? toRegisteredUserOutput(user) : null;
   }
 
   async findUserByEmail(email: string): Promise<RegisteredUserOutput | null> {
-    const user = await this.prisma.user.findUnique({ where: { email } });
+    const user = await this.prisma.user.findFirst({ where: { email, ...notDeletedUsers } });
     return user ? toRegisteredUserOutput(user) : null;
   }
 
   async findUserCredentialsByEmail(email: string): Promise<UserCredentials | null> {
-    const user = await this.prisma.user.findUnique({ where: { email } });
+    const user = await this.prisma.user.findFirst({ where: { email, ...notDeletedUsers } });
     return user ? toUserCredentials(user) : null;
   }
 
@@ -105,11 +107,14 @@ export class UserRepository implements IUserRepository {
     });
   }
 
-  async deleteUserKeepingAnActiveAdmin(id: string, newPipelineOwnerId: string): Promise<boolean> {
+  async deleteUserKeepingAnActiveAdmin(id: string, newPipelineOwnerId: string, deletedAt: Date): Promise<boolean> {
     return await this.prisma.$transaction(async (transaction) => {
       if (await this.wouldLeaveNoActiveAdmin(transaction, id)) return false;
       await transaction.pipeline.updateMany({ where: { ownerId: id }, data: { ownerId: newPipelineOwnerId } });
-      await transaction.user.delete({ where: { id } });
+      await transaction.pipelineMember.deleteMany({ where: { userId: id } });
+      await transaction.lead.updateMany({ where: { assignedToId: id }, data: { assignedToId: null } });
+      await transaction.user.update({ where: { id }, data: { active: false, deletedAt } });
+      await this.revokeAllSessionsOf(transaction, id);
       return true;
     });
   }

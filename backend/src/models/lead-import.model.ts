@@ -72,7 +72,7 @@ export interface LeadImportProgress extends LeadImportCounters {
 
 export interface LeadImportToProcess extends LeadImportCounters {
   importId: string;
-  requestedById: string | null;
+  requestedById: string;
   restoresDeletedLeads: boolean;
   destination: LeadImportDestination | null;
 }
@@ -90,7 +90,7 @@ export interface LeadImportChunk {
   processedRowsBefore: number;
   restoresDeletedLeads: boolean;
   destination: LeadImportDestination | null;
-  addedById: string | null;
+  addedById: string;
   leadsToCreate: LeadImportRowToProcess[];
 }
 
@@ -104,7 +104,7 @@ export interface LeadImportChunkResult {
 
 export interface FinishedLeadImport extends LeadImportOutcomeCounts {
   importId: string;
-  requestedById: string | null;
+  requestedById: string;
   destination: LeadImportDestination | null;
   finishedAt: Date;
 }

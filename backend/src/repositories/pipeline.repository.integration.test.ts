@@ -117,7 +117,7 @@ describe('Funil de cada usuário', () => {
     const funnelOfJoao = await database.addPipeline(joao, ['Novo lead']);
     await database.addCard(funnelOfJoao.pipelineId, funnelOfJoao.stageIdByName['Novo lead']!, await database.addLead({ name: 'Cliente do João', phone: '+5511900000001' }), 1024);
 
-    await users.deleteUserKeepingAnActiveAdmin(joao, ana);
+    await users.deleteUserKeepingAnActiveAdmin(joao, ana, new Date());
 
     const funnelsOfAna = await database.findPipelinesOwnedBy(ana);
     expect(funnelsOfAna.map((pipeline) => pipeline.id)).toContain(funnelOfJoao.pipelineId);

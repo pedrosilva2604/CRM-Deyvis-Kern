@@ -60,6 +60,13 @@ interface PipelinePlacement {
   alreadyInPipelineLeads: number;
 }
 
+interface CardsToAddAboveTop {
+  destination: LeadImportDestination;
+  leadIds: string[];
+  addedById: string;
+  topPosition: number;
+}
+
 const NOTHING_PLACED_IN_PIPELINE: PipelinePlacement = { addedToPipelineLeads: 0, alreadyInPipelineLeads: 0 };
 
 function holdsContactOf(lead: LeadContactRecord, row: LeadImportRowToProcess): boolean {
@@ -321,26 +328,38 @@ export class LeadImportRepository implements ILeadImportRepository {
 
   private async placeLeadsOfRowsInPipeline(
     transaction: DatabaseTransaction,
-    { pipelineId, stageId }: LeadImportDestination,
+    destination: LeadImportDestination,
     rows: LeadImportRowToProcess[],
-    addedById: string | null,
+    addedById: string,
   ): Promise<PipelinePlacement> {
     const leadIdsOfRows = await this.findActiveLeadIdsOfRows(transaction, rows);
     if (leadIdsOfRows.length === 0) return NOTHING_PLACED_IN_PIPELINE;
-    await lockStagesForCardPlacement(transaction, [stageId]);
+    await lockStagesForCardPlacement(transaction, [destination.stageId]);
+    const topPosition = await this.findTopPositionOfStage(transaction, destination.stageId);
+    const addedToPipelineLeads = await this.addCardsAboveTop(transaction, { destination, leadIds: leadIdsOfRows, addedById, topPosition });
+    return { addedToPipelineLeads, alreadyInPipelineLeads: leadIdsOfRows.length - addedToPipelineLeads };
+  }
+
+  private async findTopPositionOfStage(transaction: DatabaseTransaction, stageId: string): Promise<number> {
     const firstCard = await transaction.pipelineCard.findFirst({ where: { stageId }, orderBy: { position: 'asc' }, select: { position: true } });
-    const topPosition = firstCard?.position ?? 0;
+    return firstCard?.position ?? 0;
+  }
+
+  private async addCardsAboveTop(
+    transaction: DatabaseTransaction,
+    { destination, leadIds, addedById, topPosition }: CardsToAddAboveTop,
+  ): Promise<number> {
     const placement = await transaction.pipelineCard.createMany({
-      data: leadIdsOfRows.map((leadId, leadIndex) => ({
-        pipelineId,
-        stageId,
+      data: leadIds.map((leadId, leadIndex) => ({
+        pipelineId: destination.pipelineId,
+        stageId: destination.stageId,
         leadId,
         addedById,
         position: topPosition - CARD_POSITION_GAP * (leadIndex + 1),
       })),
       skipDuplicates: true,
     });
-    return { addedToPipelineLeads: placement.count, alreadyInPipelineLeads: leadIdsOfRows.length - placement.count };
+    return placement.count;
   }
 
   private async findActiveLeadIdsOfRows(transaction: DatabaseTransaction, rows: LeadImportRowToProcess[]): Promise<string[]> {

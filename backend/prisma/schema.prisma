@@ -18,15 +18,16 @@ enum Theme {
 }
 
 model User {
-  id           String   @id @default(uuid()) @db.Uuid
+  id           String    @id @default(uuid()) @db.Uuid
   name         String
-  email        String   @unique
+  email        String    @unique
   passwordHash String
-  role         Role     @default(AGENT)
-  theme        Theme    @default(LIGHT)
-  active       Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  role         Role      @default(AGENT)
+  theme        Theme     @default(LIGHT)
+  active       Boolean   @default(true)
+  deletedAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   sessions             Session[]
   passwordResetTokens  PasswordResetToken[]
@@ -136,8 +137,8 @@ model PipelineMember {
   pipeline   Pipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
   userId     String   @db.Uuid
   user       User     @relation("PipelineMembership", fields: [userId], references: [id], onDelete: Cascade)
-  addedById  String?  @db.Uuid
-  addedBy    User?    @relation("PipelineMemberAddedBy", fields: [addedById], references: [id], onDelete: SetNull)
+  addedById  String   @db.Uuid
+  addedBy    User     @relation("PipelineMemberAddedBy", fields: [addedById], references: [id], onDelete: Restrict)
   createdAt  DateTime @default(now())
 
   @@unique([pipelineId, userId])
@@ -156,8 +157,8 @@ model PipelineCard {
   wonValue    Decimal?  @db.Decimal(12, 2)
   closingNote String?
   closedAt    DateTime?
-  addedById   String?   @db.Uuid
-  addedBy     User?     @relation(fields: [addedById], references: [id], onDelete: SetNull)
+  addedById   String    @db.Uuid
+  addedBy     User      @relation(fields: [addedById], references: [id], onDelete: Restrict)
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -252,8 +253,8 @@ model LeadImport {
   pipeline               Pipeline?        @relation(fields: [pipelineId], references: [id], onDelete: SetNull)
   stageId                String?          @db.Uuid
   stage                  Stage?           @relation(fields: [stageId], references: [id], onDelete: SetNull)
-  requestedById          String?          @db.Uuid
-  requestedBy            User?            @relation(fields: [requestedById], references: [id], onDelete: SetNull)
+  requestedById          String           @db.Uuid
+  requestedBy            User             @relation(fields: [requestedById], references: [id], onDelete: Restrict)
   failureReason          String?
   createdAt              DateTime         @default(now())
   startedAt              DateTime?
