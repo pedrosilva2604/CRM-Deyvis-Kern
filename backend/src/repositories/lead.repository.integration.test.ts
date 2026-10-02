@@ -116,6 +116,17 @@ describe('Quem já tem o telefone ou o e-mail', () => {
     });
   });
 
+  it('telefone e e-mail de dois leads excluídos diferentes: aponta o lead do telefone', async () => {
+    await database.addLead({ name: 'Excluído do e-mail', phone: '+5511900000002', email: 'ana@empresa.com', deleted: true });
+    const deletedLeadOfPhone = await database.addLead({ name: 'Excluído do telefone', phone: '+5511900000001', deleted: true });
+
+    expect(await leads.findLeadHoldingContact({ phone: '+5511900000001', email: 'ana@empresa.com' }, null)).toEqual({
+      leadId: deletedLeadOfPhone,
+      heldContact: 'phone',
+      isDeleted: true,
+    });
+  });
+
   it('na edição, ignora o próprio lead', async () => {
     const maria = await database.addLead({ name: 'Maria', phone: '+5511900000001', email: 'maria@empresa.com' });
 

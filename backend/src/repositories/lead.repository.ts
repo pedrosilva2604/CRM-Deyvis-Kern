@@ -113,7 +113,10 @@ export class LeadRepository implements ILeadRepository {
       where: { OR: contactMatches, ...(ignoredLeadId !== null && { id: { not: ignoredLeadId } }) },
       select: { id: true, phone: true, deletedAt: true },
     });
-    const holder = leadsHoldingContact.find((lead) => lead.deletedAt === null) ?? leadsHoldingContact[0];
+    const holder =
+      leadsHoldingContact.find((lead) => lead.deletedAt === null) ??
+      leadsHoldingContact.find((lead) => lead.phone === phone) ??
+      leadsHoldingContact[0];
     if (!holder) return null;
     return {
       leadId: holder.id,
