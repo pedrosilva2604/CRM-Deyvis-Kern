@@ -1,5 +1,6 @@
 import { Prisma, Role } from '@prisma/client';
 import { DEFAULT_PIPELINE_STAGES } from '@/constants/default-pipeline';
+import { MAXIMUM_STAGES_PER_PIPELINE } from '@/constants/pipeline-limits';
 import {
   pipelineOutputRelations,
   toPipelineDetails,
@@ -32,13 +33,15 @@ export interface IPipelineRepository {
   removeMember(pipelineId: string, userId: string): Promise<boolean>;
   findStage(stageId: string): Promise<StageRecord | null>;
   findStageIds(pipelineId: string): Promise<string[]>;
-  createStage(pipelineId: string, stage: StageInput): Promise<void>;
+  createStage(pipelineId: string, stage: StageInput): Promise<StageCreationOutcome>;
   updateStage(stageId: string, stageChanges: UpdateStageInput): Promise<void>;
-  reorderStages(orderedStageIds: string[]): Promise<void>;
-  deleteStageMovingCards(stageId: string, receivingStageId: string): Promise<StageDeletionOutcome>;
+  reorderStages(pipelineId: string, orderedStageIds: string[]): Promise<StageReorderOutcome>;
+  deleteStageMovingCards(pipelineId: string, stageId: string, receivingStageId: string): Promise<StageDeletionOutcome>;
 }
 
-export type StageDeletionOutcome = 'deleted' | 'stageNotFound' | 'cardsWithoutWonValue';
+export type StageCreationOutcome = 'created' | 'pipelineNotFound' | 'tooManyStages';
+export type StageReorderOutcome = 'reordered' | 'pipelineNotFound' | 'stageOrderInvalid';
+export type StageDeletionOutcome = 'deleted' | 'pipelineNotFound' | 'stageNotFound' | 'lastStage' | 'cardsWithoutWonValue';
 
 interface StageClosingKind {
   id: string;
@@ -47,6 +50,14 @@ interface StageClosingKind {
 }
 
 const STAGE_POSITION_GAP = 1;
+
+function isSameSetOfStages(orderedStageIds: string[], currentStageIds: string[]): boolean {
+  return (
+    orderedStageIds.length === currentStageIds.length &&
+    new Set(orderedStageIds).size === orderedStageIds.length &&
+    orderedStageIds.every((stageId) => currentStageIds.includes(stageId))
+  );
+}
 
 export class PipelineRepository implements IPipelineRepository {
   constructor(private readonly prisma: DatabaseClient) {}
@@ -123,6 +134,7 @@ export class PipelineRepository implements IPipelineRepository {
 
   async deletePipeline(pipelineId: string): Promise<void> {
     await this.prisma.$transaction(async (transaction) => {
+      await this.lockStagesStructureOf(transaction, pipelineId);
       await lockStagesForCardPlacement(transaction, await this.findStageIdsInside(transaction, pipelineId));
       await transaction.pipelineCard.deleteMany({ where: { pipelineId } });
       await transaction.pipeline.delete({ where: { id: pipelineId } });
@@ -150,11 +162,16 @@ export class PipelineRepository implements IPipelineRepository {
     return stages.map(({ id }) => id);
   }
 
-  async createStage(pipelineId: string, stage: StageInput): Promise<void> {
-    await this.prisma.$transaction(async (transaction) => {
+  async createStage(pipelineId: string, stage: StageInput): Promise<StageCreationOutcome> {
+    return await this.prisma.$transaction(async (transaction) => {
+      if (!(await this.lockStagesStructureOf(transaction, pipelineId))) return 'pipelineNotFound';
+      const currentStageIds = await this.findStageIdsInside(transaction, pipelineId);
+      if (currentStageIds.length >= MAXIMUM_STAGES_PER_PIPELINE) return 'tooManyStages';
+
       const lastStage = await transaction.stage.findFirst({ where: { pipelineId }, orderBy: { position: 'desc' } });
       const position = lastStage ? lastStage.position + STAGE_POSITION_GAP : 0;
       await transaction.stage.create({ data: { pipelineId, position, ...stage } });
+      return 'created';
     });
   }
 
@@ -162,16 +179,26 @@ export class PipelineRepository implements IPipelineRepository {
     await this.prisma.stage.update({ where: { id: stageId }, data: stageChanges });
   }
 
-  async reorderStages(orderedStageIds: string[]): Promise<void> {
-    await this.prisma.$transaction(
-      orderedStageIds.map((stageId, position) => this.prisma.stage.update({ where: { id: stageId }, data: { position } })),
-    );
+  async reorderStages(pipelineId: string, orderedStageIds: string[]): Promise<StageReorderOutcome> {
+    return await this.prisma.$transaction(async (transaction) => {
+      if (!(await this.lockStagesStructureOf(transaction, pipelineId))) return 'pipelineNotFound';
+      const currentStageIds = await this.findStageIdsInside(transaction, pipelineId);
+      if (!isSameSetOfStages(orderedStageIds, currentStageIds)) return 'stageOrderInvalid';
+
+      for (const [position, stageId] of orderedStageIds.entries()) {
+        await transaction.stage.update({ where: { id: stageId }, data: { position } });
+      }
+      return 'reordered';
+    });
   }
 
-  async deleteStageMovingCards(stageId: string, receivingStageId: string): Promise<StageDeletionOutcome> {
+  async deleteStageMovingCards(pipelineId: string, stageId: string, receivingStageId: string): Promise<StageDeletionOutcome> {
     return await this.prisma.$transaction(async (transaction) => {
-      const lockedStageIds = await lockStagesForCardPlacement(transaction, [stageId, receivingStageId]);
-      if (lockedStageIds.length < 2) return 'stageNotFound';
+      if (!(await this.lockStagesStructureOf(transaction, pipelineId))) return 'pipelineNotFound';
+      const currentStageIds = await this.findStageIdsInside(transaction, pipelineId);
+      if (!currentStageIds.includes(stageId) || !currentStageIds.includes(receivingStageId)) return 'stageNotFound';
+      if (currentStageIds.length <= 1) return 'lastStage';
+      await lockStagesForCardPlacement(transaction, [stageId, receivingStageId]);
       const [deletedStage, receivingStage] = await this.findClosingKindsOf(transaction, stageId, receivingStageId);
       if (receivingStage.isWon && (await this.hasCardsWithoutWonValue(transaction, stageId))) return 'cardsWithoutWonValue';
 
@@ -196,6 +223,12 @@ export class PipelineRepository implements IPipelineRepository {
 
   private async hasCardsWithoutWonValue(transaction: DatabaseTransaction, stageId: string): Promise<boolean> {
     return (await transaction.pipelineCard.count({ where: { stageId, wonValue: null } })) > 0;
+  }
+
+  private async lockStagesStructureOf(transaction: DatabaseTransaction, pipelineId: string): Promise<boolean> {
+    const lockedPipelines = await transaction.$queryRaw<{ id: string }[]>`
+      SELECT "id" FROM "Pipeline" WHERE "id" = ${pipelineId}::uuid FOR NO KEY UPDATE`;
+    return lockedPipelines.length === 1;
   }
 
   private async findStageIdsInside(transaction: DatabaseTransaction, pipelineId: string): Promise<string[]> {

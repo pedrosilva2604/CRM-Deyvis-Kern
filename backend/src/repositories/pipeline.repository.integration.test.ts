@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { MAXIMUM_STAGES_PER_PIPELINE } from '@/constants/pipeline-limits';
 import { NotFoundError } from '@/errors/app-errors';
 import { TestDatabase, type TestPipeline } from '@/testing/integration/test-database';
 import { CARD_POSITION_GAP, PipelineCardRepository } from './pipeline-card.repository';
@@ -90,7 +91,7 @@ describe('Excluir uma etapa', () => {
     await database.addCard(funnel.pipelineId, newStage, await database.addLead({ name: 'Primeiro', phone: '+5511900000002' }), 1024);
     await database.addCard(funnel.pipelineId, newStage, await database.addLead({ name: 'Segundo', phone: '+5511900000003' }), 2048);
 
-    await pipelines.deleteStageMovingCards(newStage, proposalStage);
+    await pipelines.deleteStageMovingCards(funnel.pipelineId, newStage, proposalStage);
 
     expect(await database.findLeadNamesInStageOrder(proposalStage)).toEqual(['Já estava', 'Primeiro', 'Segundo']);
   });
@@ -114,13 +115,13 @@ describe('Excluir uma etapa ajusta o fechamento dos cartões à etapa que recebe
   });
 
   it('indo para uma etapa aberta, deixa de parecer vendido', async () => {
-    await pipelines.deleteStageMovingCards(funnel.stageIdByName['Ganho']!, funnel.stageIdByName['Proposta']!);
+    await pipelines.deleteStageMovingCards(funnel.pipelineId, funnel.stageIdByName['Ganho']!, funnel.stageIdByName['Proposta']!);
 
     expect(await database.findCard(wonCard)).toMatchObject({ wonValue: null, closingNote: null, closedAt: null });
   });
 
   it('indo para Perdido, perde o valor, mantém a anotação e fecha agora', async () => {
-    await pipelines.deleteStageMovingCards(funnel.stageIdByName['Ganho']!, funnel.stageIdByName['Perdido']!);
+    await pipelines.deleteStageMovingCards(funnel.pipelineId, funnel.stageIdByName['Ganho']!, funnel.stageIdByName['Perdido']!);
 
     const card = await database.findCard(wonCard);
     expect(card).toMatchObject({ wonValue: null, closingNote: 'Pagou à vista' });
@@ -128,7 +129,7 @@ describe('Excluir uma etapa ajusta o fechamento dos cartões à etapa que recebe
   });
 
   it('indo de um Ganho para outro, mantém valor, anotação e data', async () => {
-    await pipelines.deleteStageMovingCards(funnel.stageIdByName['Ganho']!, funnel.stageIdByName['Outro ganho']!);
+    await pipelines.deleteStageMovingCards(funnel.pipelineId, funnel.stageIdByName['Ganho']!, funnel.stageIdByName['Outro ganho']!);
 
     const card = await database.findCard(wonCard);
     expect(card.wonValue?.toFixed(2)).toBe('1500.00');
@@ -139,10 +140,79 @@ describe('Excluir uma etapa ajusta o fechamento dos cartões à etapa que recebe
     const lead = await database.addLead({ name: 'Negociando', phone: '+5511900000002' });
     const openCard = await database.addCard(funnel.pipelineId, funnel.stageIdByName['Proposta']!, lead, 1024);
 
-    const outcome = await pipelines.deleteStageMovingCards(funnel.stageIdByName['Proposta']!, funnel.stageIdByName['Ganho']!);
+    const outcome = await pipelines.deleteStageMovingCards(funnel.pipelineId, funnel.stageIdByName['Proposta']!, funnel.stageIdByName['Ganho']!);
 
     expect(outcome).toBe('cardsWithoutWonValue');
     expect(await database.findCard(openCard)).toMatchObject({ stageId: funnel.stageIdByName['Proposta']! });
+  });
+});
+
+describe('Duas pessoas mexendo nas etapas do mesmo funil ao mesmo tempo (em 20 disputas)', () => {
+  const newStage = { name: 'Nova', color: '#123456', isWon: false, isLost: false };
+
+  async function funnelWithStages(stageCount: number): Promise<TestPipeline> {
+    const maria = await database.addUser('Maria');
+    return await database.addPipeline(maria, Array.from({ length: stageCount }, (_, stageIndex) => `Etapa ${stageIndex + 1}`));
+  }
+
+  async function findStagePositions(pipelineId: string): Promise<number[]> {
+    const stages = await database.client.stage.findMany({ where: { pipelineId }, select: { position: true } });
+    return stages.map(({ position }) => position);
+  }
+
+  it('criar e criar com 29 etapas termina sempre em 30, sem posição repetida', async () => {
+    for (let dispute = 1; dispute <= DISPUTES_TO_CATCH_A_RACE; dispute += 1) {
+      await database.prepareEmptyDatabase();
+      const funnel = await funnelWithStages(MAXIMUM_STAGES_PER_PIPELINE - 1);
+
+      const outcomes = await Promise.all([pipelines.createStage(funnel.pipelineId, newStage), pipelines.createStage(funnel.pipelineId, newStage)]);
+
+      const positions = await findStagePositions(funnel.pipelineId);
+      expect(outcomes.sort()).toEqual(['created', 'tooManyStages']);
+      expect(positions).toHaveLength(MAXIMUM_STAGES_PER_PIPELINE);
+      expect(new Set(positions).size).toBe(positions.length);
+    }
+  }, SLOW_DISPUTE_TIMEOUT_MS);
+
+  it('excluir e excluir as duas últimas etapas sempre deixa uma', async () => {
+    for (let dispute = 1; dispute <= DISPUTES_TO_CATCH_A_RACE; dispute += 1) {
+      await database.prepareEmptyDatabase();
+      const funnel = await funnelWithStages(2);
+      const [firstStage, secondStage] = [funnel.stageIdByName['Etapa 1']!, funnel.stageIdByName['Etapa 2']!];
+
+      const outcomes = await Promise.all([
+        pipelines.deleteStageMovingCards(funnel.pipelineId, firstStage, secondStage),
+        pipelines.deleteStageMovingCards(funnel.pipelineId, secondStage, firstStage),
+      ]);
+
+      expect(outcomes.filter((outcome) => outcome === 'deleted')).toHaveLength(1);
+      expect(await findStagePositions(funnel.pipelineId)).toHaveLength(1);
+    }
+  }, SLOW_DISPUTE_TIMEOUT_MS);
+
+  it('criar e excluir com 30 etapas termina com o número certo para a ordem em que foram atendidos', async () => {
+    for (let dispute = 1; dispute <= DISPUTES_TO_CATCH_A_RACE; dispute += 1) {
+      await database.prepareEmptyDatabase();
+      const funnel = await funnelWithStages(MAXIMUM_STAGES_PER_PIPELINE);
+
+      const [creation, deletion] = await Promise.all([
+        pipelines.createStage(funnel.pipelineId, newStage),
+        pipelines.deleteStageMovingCards(funnel.pipelineId, funnel.stageIdByName['Etapa 1']!, funnel.stageIdByName['Etapa 2']!),
+      ]);
+
+      const positions = await findStagePositions(funnel.pipelineId);
+      expect(deletion).toBe('deleted');
+      expect(positions).toHaveLength(creation === 'created' ? MAXIMUM_STAGES_PER_PIPELINE : MAXIMUM_STAGES_PER_PIPELINE - 1);
+      expect(new Set(positions).size).toBe(positions.length);
+    }
+  }, SLOW_DISPUTE_TIMEOUT_MS);
+
+  it('reordenar sem conhecer a etapa que acabou de ser criada é recusado', async () => {
+    const funnel = await funnelWithStages(3);
+    const stagesBeforeCreation = Object.values(funnel.stageIdByName);
+    await pipelines.createStage(funnel.pipelineId, newStage);
+
+    expect(await pipelines.reorderStages(funnel.pipelineId, [...stagesBeforeCreation].reverse())).toBe('stageOrderInvalid');
   });
 });
 

@@ -1,6 +1,5 @@
 import { NotificationType, Role } from '@prisma/client';
 import { PIPELINE_NOTIFICATION_MESSAGES } from '@/constants/notification-messages';
-import { MAXIMUM_STAGES_PER_PIPELINE } from '@/constants/pipeline-limits';
 import { BadRequestError, ForbiddenError, NotFoundError } from '@/errors/app-errors';
 import { LEAD_ERRORS, PIPELINE_ERRORS } from '@/errors/errors.constants';
 import type { Clock } from '@/infra/clock';
@@ -30,7 +29,7 @@ import type {
 } from '@/models/pipeline.model';
 import type { ILeadRepository } from '@/repositories/lead.repository';
 import type { IPipelineCardRepository } from '@/repositories/pipeline-card.repository';
-import type { IPipelineRepository, PipelineViewer } from '@/repositories/pipeline.repository';
+import type { IPipelineRepository, PipelineViewer, StageDeletionOutcome } from '@/repositories/pipeline.repository';
 import type { IAuditService } from './audit.service';
 import type { INotificationService } from './notification.service';
 import type { IPipelineChangeAnnouncer } from './pipeline-change-announcer';
@@ -54,6 +53,13 @@ export interface IPipelineService {
 }
 
 const MANAGING_ACCESS_LEVELS: PipelineAccess['level'][] = ['admin', 'owner'];
+
+const STAGE_DELETION_ERRORS: Record<Exclude<StageDeletionOutcome, 'deleted'>, () => Error> = {
+  pipelineNotFound: () => new NotFoundError(PIPELINE_ERRORS.NOT_FOUND),
+  stageNotFound: () => new NotFoundError(PIPELINE_ERRORS.STAGE_NOT_FOUND),
+  lastStage: () => new BadRequestError(PIPELINE_ERRORS.LAST_STAGE),
+  cardsWithoutWonValue: () => new BadRequestError(PIPELINE_ERRORS.RECEIVING_STAGE_NEEDS_WON_VALUE),
+};
 
 export class PipelineService implements IPipelineService {
   constructor(
@@ -131,9 +137,9 @@ export class PipelineService implements IPipelineService {
 
   async createStage({ targetPipelineId, stage }: CreateStageRequest, loggedUserContext: LoggedUserContext): Promise<void> {
     await this.findAccessOrFail(targetPipelineId, loggedUserContext);
-    const stageIds = await this.pipelineRepository.findStageIds(targetPipelineId);
-    if (stageIds.length >= MAXIMUM_STAGES_PER_PIPELINE) throw new BadRequestError(PIPELINE_ERRORS.TOO_MANY_STAGES);
-    await this.pipelineRepository.createStage(targetPipelineId, stage);
+    const stageCreation = await this.pipelineRepository.createStage(targetPipelineId, stage);
+    if (stageCreation === 'pipelineNotFound') throw new NotFoundError(PIPELINE_ERRORS.NOT_FOUND);
+    if (stageCreation === 'tooManyStages') throw new BadRequestError(PIPELINE_ERRORS.TOO_MANY_STAGES);
     await this.pipelineChanges.announce(targetPipelineId);
   }
 
@@ -153,14 +159,9 @@ export class PipelineService implements IPipelineService {
 
   async reorderStages({ targetPipelineId, stageIds }: ReorderStagesRequest, loggedUserContext: LoggedUserContext): Promise<void> {
     await this.findAccessOrFail(targetPipelineId, loggedUserContext);
-    const currentStageIds = await this.pipelineRepository.findStageIds(targetPipelineId);
-    const isSameSetOfStages =
-      stageIds.length === currentStageIds.length &&
-      new Set(stageIds).size === stageIds.length &&
-      stageIds.every((stageId) => currentStageIds.includes(stageId));
-    if (!isSameSetOfStages) throw new BadRequestError(PIPELINE_ERRORS.STAGE_ORDER_INVALID);
-
-    await this.pipelineRepository.reorderStages(stageIds);
+    const stageReorder = await this.pipelineRepository.reorderStages(targetPipelineId, stageIds);
+    if (stageReorder === 'pipelineNotFound') throw new NotFoundError(PIPELINE_ERRORS.NOT_FOUND);
+    if (stageReorder === 'stageOrderInvalid') throw new BadRequestError(PIPELINE_ERRORS.STAGE_ORDER_INVALID);
     await this.pipelineChanges.announce(targetPipelineId);
   }
 
@@ -170,15 +171,10 @@ export class PipelineService implements IPipelineService {
   ): Promise<void> {
     await this.findAccessOrFail(targetPipelineId, loggedUserContext);
     await this.findStageOfPipelineOrFail(targetPipelineId, targetStageId);
-    const stageIds = await this.pipelineRepository.findStageIds(targetPipelineId);
-    if (stageIds.length <= 1) throw new BadRequestError(PIPELINE_ERRORS.LAST_STAGE);
-    if (moveCardsToStageId === targetStageId || !stageIds.includes(moveCardsToStageId)) {
-      throw new BadRequestError(PIPELINE_ERRORS.RECEIVING_STAGE_INVALID);
-    }
+    await this.assertCanReceiveCards(targetPipelineId, targetStageId, moveCardsToStageId);
 
-    const stageDeletion = await this.pipelineRepository.deleteStageMovingCards(targetStageId, moveCardsToStageId);
-    if (stageDeletion === 'stageNotFound') throw new NotFoundError(PIPELINE_ERRORS.STAGE_NOT_FOUND);
-    if (stageDeletion === 'cardsWithoutWonValue') throw new BadRequestError(PIPELINE_ERRORS.RECEIVING_STAGE_NEEDS_WON_VALUE);
+    const stageDeletion = await this.pipelineRepository.deleteStageMovingCards(targetPipelineId, targetStageId, moveCardsToStageId);
+    if (stageDeletion !== 'deleted') throw STAGE_DELETION_ERRORS[stageDeletion]();
     await this.recordPipelineAuditLog(loggedUserContext, 'pipeline.stage_delete', targetPipelineId, {
       stageId: targetStageId,
       cardsMovedToStageId: moveCardsToStageId,
@@ -235,6 +231,13 @@ export class PipelineService implements IPipelineService {
     await this.cardRepository.removeCard(targetCardId);
     await this.recordPipelineAuditLog(loggedUserContext, 'pipeline.card_remove', targetPipelineId, { leadId: card.leadId });
     await this.pipelineChanges.announce(targetPipelineId);
+  }
+
+  private async assertCanReceiveCards(pipelineId: string, deletedStageId: string, receivingStageId: string): Promise<void> {
+    const receivingStage = await this.pipelineRepository.findStage(receivingStageId);
+    if (receivingStageId === deletedStageId || receivingStage?.pipelineId !== pipelineId) {
+      throw new BadRequestError(PIPELINE_ERRORS.RECEIVING_STAGE_INVALID);
+    }
   }
 
   private decideClosing(destinationStage: StageRecord, { wonValue, closingNote }: MoveCardInput): CardClosing {
