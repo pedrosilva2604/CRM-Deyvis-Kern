@@ -58,8 +58,8 @@ function ProgressCheckFailed({ onTryAgain, isTryingAgain }: { onTryAgain: () => 
   return (
     <div className="space-y-3">
       <Alert variant="error">
-        Não foi possível acompanhar a importação. Ela pode continuar rodando: a lista de leads se atualiza quando
-        terminar.
+        Não foi possível acompanhar a importação. Ela pode continuar rodando: clique em Tentar de novo para ver o
+        andamento.
       </Alert>
       <Button variant="secondary" onClick={onTryAgain} disabled={isTryingAgain}>
         {isTryingAgain ? 'Consultando...' : 'Tentar de novo'}
