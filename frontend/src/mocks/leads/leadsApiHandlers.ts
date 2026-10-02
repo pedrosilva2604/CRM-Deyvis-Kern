@@ -84,7 +84,6 @@ export const leadsApiHandlers = [
     return HttpResponse.json(
       listLeads({
         search: searchParams.get('search') ?? '',
-        stageId: searchParams.get('stageId') ?? '',
         source: searchParams.get('source') ?? '',
         assignment: searchParams.get('assignment') ?? '',
         contactStatus: searchParams.get('contactStatus') ?? '',

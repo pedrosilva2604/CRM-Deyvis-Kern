@@ -8,20 +8,6 @@ export const CONTACT_STATUS_LABELS: Record<LeadContactStatus, string> = {
 
 export const UNASSIGNED_LEADS_FILTER = 'unassigned';
 
-export interface LeadStage {
-  id: string;
-  name: string;
-  color: string;
-  isWon: boolean;
-  isLost: boolean;
-}
-
-export interface LeadPipeline {
-  id: string;
-  name: string;
-  stages: LeadStage[];
-}
-
 export interface LeadAssignee {
   id: string;
   name: string;
@@ -38,8 +24,6 @@ export interface LeadListItem {
   value: string | null;
   contactStatus: LeadContactStatus;
   enteredOn: string;
-  pipeline: { id: string; name: string };
-  stage: LeadStage;
   assignedTo: LeadAssignee | null;
   unreadCount: number;
   lastMessageAt: string | null;
@@ -56,7 +40,6 @@ export interface LeadListPage {
 
 export interface LeadListFilters {
   search: string;
-  stageId: string;
   source: string;
   assignment: string;
   contactStatus: LeadContactStatus | '';
@@ -87,7 +70,6 @@ export interface CompleteProfilesIndicator {
 }
 
 export interface LeadFilterOptions {
-  pipelines: LeadPipeline[];
   sources: string[];
   assignees: LeadAssignee[];
 }
@@ -110,6 +92,9 @@ export interface LeadImportProgress {
   skippedExistingLeads: number;
   restoredLeads: number;
   skippedDeletedLeads: number;
+  addedToPipelineLeads: number;
+  alreadyInPipelineLeads: number;
+  importsIntoPipeline: boolean;
   createdAt: string;
   finishedAt: string | null;
 }
