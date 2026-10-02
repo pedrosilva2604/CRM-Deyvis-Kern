@@ -9,6 +9,9 @@ export const AUTH_ERRORS = {
 export const USER_ERRORS = {
   NOT_FOUND: 'Usuário não encontrado',
   EMAIL_IN_USE: 'Já existe um usuário com este e-mail',
+  EMAIL_OF_DELETED_USER: 'Este e-mail é de um usuário excluído. Você pode restaurá-lo com o histórico dele.',
+  EMAIL_OF_DELETED_USER_ON_EDIT: 'Este e-mail é de um usuário excluído',
+  DELETED_USER_NOT_FOUND: 'Usuário excluído não encontrado',
   SELF_ACTION: 'Você não pode realizar esta ação no seu próprio usuário',
   LAST_ADMIN: 'O CRM precisa de pelo menos um administrador ativo',
 } as const;

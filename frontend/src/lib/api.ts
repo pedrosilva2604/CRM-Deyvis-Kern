@@ -23,6 +23,12 @@ export function apiErrorMessage(err: unknown, fallback = 'Ocorreu um erro') {
   return fallback;
 }
 
+export function apiResponseField(err: unknown, field: string): string | null {
+  if (!axios.isAxiosError(err)) return null;
+  const value = (err.response?.data as Record<string, unknown> | undefined)?.[field];
+  return typeof value === 'string' ? value : null;
+}
+
 export function apiFieldErrors(err: unknown): FieldErrors {
   if (!axios.isAxiosError(err)) return {};
   const issues = (err.response?.data as { issues?: Record<string, string[] | undefined> })?.issues ?? {};

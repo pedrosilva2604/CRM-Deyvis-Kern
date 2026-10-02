@@ -37,6 +37,7 @@ export const USER_SUCCESS_MESSAGES = {
   DEACTIVATED: 'Usuário desativado',
   PASSWORD_CHANGED: 'Senha do usuário alterada',
   DELETED: 'Usuário excluído',
+  RESTORED: 'Usuário restaurado',
 } as const;
 
 export const AUTH_SUCCESS_MESSAGES = {

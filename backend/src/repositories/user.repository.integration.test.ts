@@ -112,6 +112,33 @@ describe('Excluir um usuário guarda o histórico', () => {
   });
 });
 
+describe('Restaurar um usuário excluído', () => {
+  it('volta a mesma pessoa, com o histórico, a senha nova e um funil próprio', async () => {
+    const ana = await database.addUser('Ana', { role: 'ADMIN' });
+    const joao = await database.addUser('João');
+    const emailOfJoao = (await database.findUser(joao)).email;
+    const funnelOfAna = await database.addPipeline(ana, ['Novo lead']);
+    const lead = await database.addLead({ name: 'Cliente', phone: '+5511900000001' });
+    const cardAddedByJoao = await database.addCard(funnelOfAna.pipelineId, funnelOfAna.stageIdByName['Novo lead']!, lead, 1024, joao);
+    await users.deleteUserKeepingAnActiveAdmin(joao, ana, new Date());
+
+    expect(await users.findDeletedUserIdByEmail(emailOfJoao)).toBe(joao);
+    expect(await users.restoreDeletedUser(joao, NEW_PASSWORD_HASH)).toBe(true);
+
+    expect(await database.findUser(joao)).toMatchObject({ active: true, deletedAt: null, passwordHash: NEW_PASSWORD_HASH });
+    expect(await database.findCard(cardAddedByJoao)).toMatchObject({ addedById: joao });
+    expect((await database.findPipelinesOwnedBy(joao)).map((pipeline) => pipeline.name)).toEqual(['Funil de João']);
+    expect(await users.findDeletedUserIdByEmail(emailOfJoao)).toBeNull();
+  });
+
+  it('não restaura quem não está excluído', async () => {
+    const joao = await database.addUser('João');
+
+    expect(await users.restoreDeletedUser(joao, NEW_PASSWORD_HASH)).toBe(false);
+    expect(await database.findUser(joao)).toMatchObject({ passwordHash: ORIGINAL_PASSWORD_HASH });
+  });
+});
+
 describe('Redefinir senha pelo link: ou tudo, ou nada', () => {
   it('troca a senha, gasta o link e encerra as sessões juntos', async () => {
     const maria = await database.addUser('Maria');

@@ -39,6 +39,15 @@ export class DeletedLeadHoldsContactError extends ConflictError {
   }
 }
 
+export class DeletedUserHoldsEmailError extends ConflictError {
+  readonly extraResponseFields: Record<string, string>;
+
+  constructor(message: string, deletedUserId: string) {
+    super(message);
+    this.extraResponseFields = { deletedUserId };
+  }
+}
+
 export class DatabaseUnavailableError extends AppError {
   readonly statusCode = HttpStatus.SERVICE_UNAVAILABLE;
 }

@@ -19,6 +19,8 @@ export interface IUserRepository {
   findUserById(id: string): Promise<RegisteredUserOutput | null>;
   findUserByEmail(email: string): Promise<RegisteredUserOutput | null>;
   findUserCredentialsByEmail(email: string): Promise<UserCredentials | null>;
+  findDeletedUserIdByEmail(email: string): Promise<string | null>;
+  restoreDeletedUser(id: string, passwordHash: string): Promise<boolean>;
   findActiveUsersForAssignment(): Promise<LeadPersonOutput[]>;
   isActiveUser(id: string): Promise<boolean>;
   updateUserKeepingAnActiveAdmin(id: string, data: UpdateUserData): Promise<RegisteredUserOutput | null>;
@@ -66,6 +68,23 @@ export class UserRepository implements IUserRepository {
   async findUserCredentialsByEmail(email: string): Promise<UserCredentials | null> {
     const user = await this.prisma.user.findFirst({ where: { email, ...notDeletedUsers } });
     return user ? toUserCredentials(user) : null;
+  }
+
+  async findDeletedUserIdByEmail(email: string): Promise<string | null> {
+    const deletedUser = await this.prisma.user.findFirst({ where: { email, deletedAt: { not: null } }, select: { id: true } });
+    return deletedUser?.id ?? null;
+  }
+
+  async restoreDeletedUser(id: string, passwordHash: string): Promise<boolean> {
+    return await this.prisma.$transaction(async (transaction) => {
+      const restoration = await transaction.user.updateMany({
+        where: { id, deletedAt: { not: null } },
+        data: { deletedAt: null, active: true, passwordHash },
+      });
+      if (restoration.count === 0) return false;
+      await this.giveDefaultPipelineIfMissing(transaction, id);
+      return true;
+    });
   }
 
   async findActiveUsersForAssignment(): Promise<LeadPersonOutput[]> {
@@ -139,6 +158,14 @@ export class UserRepository implements IUserRepository {
       SELECT "id" FROM "User" WHERE "role" = 'ADMIN' AND "active" = true FOR UPDATE`;
     const isTargetAnActiveAdmin = lockedActiveAdmins.some((activeAdmin) => activeAdmin.id === userId);
     return isTargetAnActiveAdmin && lockedActiveAdmins.length <= 1;
+  }
+
+  private async giveDefaultPipelineIfMissing(transaction: DatabaseTransaction, userId: string): Promise<void> {
+    if ((await transaction.pipeline.count({ where: { ownerId: userId } })) > 0) return;
+    const { name } = await transaction.user.findUniqueOrThrow({ where: { id: userId }, select: { name: true } });
+    await transaction.pipeline.create({
+      data: { name: defaultPipelineNameFor(name), ownerId: userId, stages: { create: DEFAULT_PIPELINE_STAGES } },
+    });
   }
 
   private async revokeAllSessionsOf(transaction: DatabaseTransaction, userId: string): Promise<void> {
