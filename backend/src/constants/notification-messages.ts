@@ -26,6 +26,13 @@ function describeCompletedLeadImport({
   return sentences.join(' ');
 }
 
+export const PIPELINE_NOTIFICATION_MESSAGES = {
+  MEMBER_ADDED: {
+    title: 'Você foi adicionado a um funil',
+    message: (pipelineName: string) => `Agora você participa do funil "${pipelineName}" e pode trabalhar nele.`,
+  },
+} as const;
+
 export const LEAD_IMPORT_NOTIFICATION_MESSAGES = {
   COMPLETED: {
     title: 'Importação concluída',

@@ -36,6 +36,25 @@ export const LEAD_IMPORT_ERRORS = {
   REQUESTER_HAS_RUNNING_IMPORT: 'Quem enviou esta planilha já tem outra importação em andamento. Tente de novo quando ela terminar.',
 } as const;
 
+export const PIPELINE_ERRORS = {
+  NOT_FOUND: 'Funil não encontrado',
+  ONLY_MANAGER: 'Só o dono do funil ou um administrador pode fazer isso',
+  OWNER_NOT_AVAILABLE: 'O dono escolhido não existe ou está desativado',
+  ONLY_ADMIN_CHOOSES_OWNER: 'Só um administrador pode criar funil para outra pessoa',
+  MEMBER_NOT_AVAILABLE: 'Só é possível adicionar vendedores ativos',
+  OWNER_ALREADY_HAS_ACCESS: 'O dono já tem acesso ao funil',
+  MEMBER_ALREADY_ADDED: 'Esta pessoa já participa deste funil',
+  MEMBER_NOT_FOUND: 'Esta pessoa não participa deste funil',
+  STAGE_NOT_FOUND: 'Etapa não encontrada neste funil',
+  LAST_STAGE: 'O funil precisa ter ao menos uma etapa',
+  RECEIVING_STAGE_INVALID: 'Escolha outra etapa deste funil para receber os cartões',
+  STAGE_ORDER_INVALID: 'Envie todas as etapas do funil, cada uma uma única vez',
+  CARD_NOT_FOUND: 'Cartão não encontrado neste funil',
+  LEAD_ALREADY_IN_PIPELINE: 'Este lead já está neste funil',
+  PREVIOUS_CARD_INVALID: 'O cartão de referência não está nesta etapa',
+  WON_VALUE_REQUIRED: 'Informe o valor da venda para mover para uma etapa de ganho',
+} as const;
+
 export const NOTIFICATION_ERRORS = {
   NOT_FOUND: 'Notificação não encontrada',
 } as const;
