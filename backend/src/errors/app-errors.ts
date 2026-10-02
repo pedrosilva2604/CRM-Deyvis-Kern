@@ -4,8 +4,8 @@ export abstract class AppError extends Error {
   abstract readonly statusCode: HttpStatusCode;
   readonly extraResponseFields: Record<string, string> = {};
 
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, technicalCause?: unknown) {
+    super(message, technicalCause === undefined ? undefined : { cause: technicalCause });
     this.name = new.target.name;
   }
 }

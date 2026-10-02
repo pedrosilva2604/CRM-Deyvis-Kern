@@ -1,5 +1,6 @@
 import { Worker, type Job } from 'bullmq';
 import type { Redis } from 'ioredis';
+import { logFailure } from '@/infra/technical-error';
 import {
   DELETE_OLD_READ_NOTIFICATIONS_JOB_NAME,
   EXPIRE_FAILED_LEAD_IMPORTS_JOB_NAME,
@@ -24,7 +25,7 @@ export class MaintenanceWorker {
       concurrency: 1,
     });
     this.worker.on('completed', (job, result) => this.logMaintenanceResult(job, result));
-    this.worker.on('failed', (job, error) => console.error(`Manutenção ${job?.name} falhou: ${error.message}`));
+    this.worker.on('failed', (job, error) => logFailure({ worker: 'maintenance', job: job?.name }, error));
     this.worker.on('error', (error) => console.error(`Worker de manutenção: ${error.message}`));
   }
 
