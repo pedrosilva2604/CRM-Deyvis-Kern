@@ -27,7 +27,7 @@ function describeCompletedLeadImport({
 }: CompletedLeadImportSummary): string {
   const sentences = [`${formatLeadCount(importedLeads)} importados para o CRM.`];
   if (restoredLeads > 0) sentences.push(`${formatLeadCount(restoredLeads)} que estavam excluídos foram restaurados.`);
-  if (skippedExistingLeads > 0) sentences.push(`${formatLeadCount(skippedExistingLeads)} já existiam no CRM e foram ignorados.`);
+  if (skippedExistingLeads > 0) sentences.push(`${formatLeadCount(skippedExistingLeads)} já existiam no CRM e não foram duplicados.`);
   if (skippedDeletedLeads > 0) {
     sentences.push(`${formatLeadCount(skippedDeletedLeads)} pertencem a leads excluídos: peça a um administrador para restaurá-los.`);
   }
