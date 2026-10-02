@@ -43,6 +43,8 @@ function chunkOf(importId: string, phones: string[], { importedBy }: { importedB
     importId,
     processedRowsBefore: 0,
     restoresDeletedLeads: importedBy === 'admin',
+    destination: null,
+    addedById: null,
     leadsToCreate: leadsToCreateFrom(phones),
   };
 }
@@ -73,7 +75,7 @@ describe('Gravação de um pedaço da importação', () => {
 
     const chunkResult = await leadImports.importChunk(chunkOf(importId, ['+5511900000001', '+5511900000002'], { importedBy: 'seller' }));
 
-    expect(chunkResult).toEqual({ insertedLeads: 1, restoredLeads: 0, skippedDeletedLeads: 0 });
+    expect(chunkResult).toMatchObject({ insertedLeads: 1, restoredLeads: 0, skippedDeletedLeads: 0 });
     expect(await database.findPhonesOfAllLeads()).toEqual(['+5511900000001', '+5511900000002']);
     expect(await database.findLeadImport(importId)).toMatchObject({ importedLeads: 1, skippedExistingLeads: 1 });
   });
@@ -99,7 +101,7 @@ describe('Telefones de leads excluídos na importação', () => {
 
     const chunkResult = await leadImports.importChunk(chunkOf(importId, ['+5511900000001', '+5511900000002'], { importedBy: 'admin' }));
 
-    expect(chunkResult).toEqual({ insertedLeads: 1, restoredLeads: 1, skippedDeletedLeads: 0 });
+    expect(chunkResult).toMatchObject({ insertedLeads: 1, restoredLeads: 1, skippedDeletedLeads: 0 });
     expect(await database.findLeadByPhone('+5511900000001')).toMatchObject({ name: 'Cliente excluído', deletedAt: null });
     expect(await database.findLeadImport(importId)).toMatchObject({ importedLeads: 1, restoredLeads: 1, skippedExistingLeads: 0 });
   });
@@ -114,7 +116,7 @@ describe('Telefones de leads excluídos na importação', () => {
       chunkOf(importId, ['+5511900000001', '+5511900000002', '+5511900000003'], { importedBy: 'seller' }),
     );
 
-    expect(chunkResult).toEqual({ insertedLeads: 1, restoredLeads: 0, skippedDeletedLeads: 1 });
+    expect(chunkResult).toMatchObject({ insertedLeads: 1, restoredLeads: 0, skippedDeletedLeads: 1 });
     expect(await database.findLeadByPhone('+5511900000001')).toMatchObject({ deletedAt: expect.any(Date) });
     expect(await database.findLeadImport(importId)).toMatchObject({
       importedLeads: 1,
@@ -135,7 +137,7 @@ describe('Lead excluído reconhecido pelo e-mail na importação', () => {
       chunkWithRows(importId, [{ phone: '+5511900000099', email: 'joao@empresa.com' }], { importedBy: 'admin' }),
     );
 
-    expect(chunkResult).toEqual({ insertedLeads: 0, restoredLeads: 1, skippedDeletedLeads: 0 });
+    expect(chunkResult).toMatchObject({ insertedLeads: 0, restoredLeads: 1, skippedDeletedLeads: 0 });
     expect(await database.findLeadByPhone('+5511900000099')).toMatchObject({ name: 'João excluído', deletedAt: null });
   });
 
@@ -208,7 +210,7 @@ describe('Lead excluído reconhecido pelo e-mail na importação', () => {
       ),
     );
 
-    expect(chunkResult).toEqual({ insertedLeads: 0, restoredLeads: 1, skippedDeletedLeads: 0 });
+    expect(chunkResult).toMatchObject({ insertedLeads: 0, restoredLeads: 1, skippedDeletedLeads: 0 });
     expect(await database.findLeadImport(importId)).toMatchObject({ restoredLeads: 1, skippedExistingLeads: 1 });
   });
 
@@ -232,9 +234,49 @@ describe('Lead excluído reconhecido pelo e-mail na importação', () => {
       chunkWithRows(importId, [{ phone: '+5511900000001', email: 'joao@empresa.com' }], { importedBy: 'admin' }),
     );
 
-    expect(chunkResult).toEqual({ insertedLeads: 0, restoredLeads: 0, skippedDeletedLeads: 0 });
+    expect(chunkResult).toMatchObject({ insertedLeads: 0, restoredLeads: 0, skippedDeletedLeads: 0 });
     expect(await database.findLeadImport(importId)).toMatchObject({ skippedExistingLeads: 1 });
     expect(await database.findLeadByPhone('+5511900000002')).toMatchObject({ deletedAt: expect.any(Date) });
+  });
+});
+
+describe('Importação direto numa etapa do funil', () => {
+  it('cria os novos na base, põe no funil quem não estava e deixa onde está quem já estava', async () => {
+    const maria = await database.addUser('Maria');
+    const funnel = await database.addPipeline(maria, ['Novo lead', 'Proposta']);
+    const newStage = funnel.stageIdByName['Novo lead']!;
+    const proposalStage = funnel.stageIdByName['Proposta']!;
+    await database.addLead({ name: 'Cliente antigo fora do funil', phone: '+5511900000001' });
+    const alreadyInFunnel = await database.addLead({ name: 'Cliente já na proposta', phone: '+5511900000002' });
+    await database.addCard(funnel.pipelineId, proposalStage, alreadyInFunnel, 1024);
+    const importId = await database.addLeadImport({ requestedById: maria, status: 'PROCESSING' });
+
+    const chunkResult = await leadImports.importChunk({
+      ...chunkOf(importId, ['+5511900000001', '+5511900000002', '+5511900000003'], { importedBy: 'seller' }),
+      destination: { pipelineId: funnel.pipelineId, stageId: newStage },
+      addedById: maria,
+    });
+
+    expect(chunkResult).toMatchObject({ insertedLeads: 1, addedToPipelineLeads: 2, alreadyInPipelineLeads: 1 });
+    expect((await database.findLeadNamesInStageOrder(newStage)).sort()).toEqual(['Cliente antigo fora do funil', 'Lead +5511900000003']);
+    expect(await database.findLeadNamesInStageOrder(proposalStage)).toEqual(['Cliente já na proposta']);
+    expect(await database.findLeadImport(importId)).toMatchObject({ addedToPipelineLeads: 2, alreadyInPipelineLeads: 1 });
+  });
+
+  it('na importação de vendedor, lead excluído não entra no funil', async () => {
+    const maria = await database.addUser('Maria');
+    const funnel = await database.addPipeline(maria, ['Novo lead']);
+    await database.addLead({ name: 'Excluído', phone: '+5511900000001', deleted: true });
+    const importId = await database.addLeadImport({ requestedById: maria, status: 'PROCESSING' });
+
+    const chunkResult = await leadImports.importChunk({
+      ...chunkOf(importId, ['+5511900000001'], { importedBy: 'seller' }),
+      destination: { pipelineId: funnel.pipelineId, stageId: funnel.stageIdByName['Novo lead']! },
+      addedById: maria,
+    });
+
+    expect(chunkResult).toMatchObject({ skippedDeletedLeads: 1, addedToPipelineLeads: 0 });
+    expect(await database.findLeadNamesInStageOrder(funnel.stageIdByName['Novo lead']!)).toEqual([]);
   });
 });
 

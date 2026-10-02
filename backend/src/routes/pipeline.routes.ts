@@ -1,5 +1,11 @@
 import { Router } from 'express';
+import type { LeadImportController } from '@/controllers/lead-import.controller';
 import type { PipelineController } from '@/controllers/pipeline.controller';
+import { BadRequestError } from '@/errors/app-errors';
+import { LEAD_IMPORT_ERRORS } from '@/errors/errors.constants';
+import type { CsvUploadMiddleware } from '@/middlewares/csv-upload.middleware';
+import type { RateLimitMiddleware } from '@/middlewares/rate-limit.middleware';
+import { leadImportFileSchema } from '@/middlewares/schemas/lead-import.schema';
 import {
   addCardSchema,
   addPipelineMemberSchema,
@@ -18,17 +24,34 @@ import {
 } from '@/middlewares/schemas/pipeline.schema';
 import type { ValidationMiddleware } from '@/middlewares/validation.middleware';
 
+const missingCsvFile = () => new BadRequestError(LEAD_IMPORT_ERRORS.MISSING_FILE);
+
 export class PipelineRoutes {
   readonly router = Router();
 
   constructor(
     private readonly pipelines: PipelineController,
+    private readonly leadImports: LeadImportController,
     private readonly validate: ValidationMiddleware,
+    private readonly csvUpload: CsvUploadMiddleware,
+    private readonly rateLimit: RateLimitMiddleware,
   ) {
     this.registerPipelineRoutes();
     this.registerMemberRoutes();
     this.registerStageRoutes();
     this.registerCardRoutes();
+    this.registerImportRoutes();
+  }
+
+  private registerImportRoutes() {
+    this.router.post(
+      '/:pipelineId/stages/:stageId/imports',
+      this.rateLimit.leadImportLimiter,
+      this.validate.validateParams(pipelineStageParamsSchema),
+      this.csvUpload.readCsvBody,
+      this.validate.validateBody(leadImportFileSchema, missingCsvFile),
+      this.leadImports.requestLeadImportIntoPipeline,
+    );
   }
 
   private registerPipelineRoutes() {

@@ -8,6 +8,7 @@ import type {
 } from '@/models/lead-import.model';
 import type { ILeadImportRepository } from '@/repositories/lead-import.repository';
 import type { ILeadImportNotificationService } from './lead-import-notification.service';
+import type { IPipelineChangeAnnouncer } from './pipeline-change-announcer';
 
 export type ReportLeadImportProgress = (counters: LeadImportCounters) => Promise<void>;
 
@@ -29,6 +30,7 @@ export class LeadImportProcessingService implements ILeadImportProcessingService
     private readonly leadImportRepository: ILeadImportRepository,
     private readonly leadImportNotifications: ILeadImportNotificationService,
     private readonly realtimePublisher: IRealtimePublisher,
+    private readonly pipelineChanges: IPipelineChangeAnnouncer,
     private readonly clock: Clock,
     private readonly settings: LeadImportProcessingSettings,
   ) {}
@@ -43,6 +45,7 @@ export class LeadImportProcessingService implements ILeadImportProcessingService
       counters = await this.importRows(leadImport, counters, nextRows);
       await reportProgress(counters);
       await this.publishProgressToRequester(leadImport, counters);
+      if (leadImport.destination) await this.pipelineChanges.announce(leadImport.destination.pipelineId);
       nextRows = await this.findNextRows(importId, counters.processedRows);
     }
 
@@ -72,6 +75,8 @@ export class LeadImportProcessingService implements ILeadImportProcessingService
       skippedExistingLeads: leadImport.skippedExistingLeads,
       restoredLeads: leadImport.restoredLeads,
       skippedDeletedLeads: leadImport.skippedDeletedLeads,
+      addedToPipelineLeads: leadImport.addedToPipelineLeads,
+      alreadyInPipelineLeads: leadImport.alreadyInPipelineLeads,
     };
   }
 
@@ -93,6 +98,8 @@ export class LeadImportProcessingService implements ILeadImportProcessingService
       skippedExistingLeads: counters.skippedExistingLeads + skippedExistingLeads,
       restoredLeads: counters.restoredLeads + chunkResult.restoredLeads,
       skippedDeletedLeads: counters.skippedDeletedLeads + chunkResult.skippedDeletedLeads,
+      addedToPipelineLeads: counters.addedToPipelineLeads + chunkResult.addedToPipelineLeads,
+      alreadyInPipelineLeads: counters.alreadyInPipelineLeads + chunkResult.alreadyInPipelineLeads,
     };
   }
 
@@ -106,6 +113,8 @@ export class LeadImportProcessingService implements ILeadImportProcessingService
       importId: leadImport.importId,
       processedRowsBefore: counters.processedRows,
       restoresDeletedLeads: leadImport.restoresDeletedLeads,
+      destination: leadImport.destination,
+      addedById: leadImport.requestedById,
       leadsToCreate: rowsInLockOrder,
     };
   }

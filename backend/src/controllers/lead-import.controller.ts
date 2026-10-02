@@ -3,6 +3,7 @@ import { LEAD_IMPORT_SUCCESS_MESSAGES } from '@/constants/success-messages';
 import { HttpStatus } from '@/infra/http-status';
 import type { RequestContextExtractor } from '@/infra/request-context-extractor';
 import type { LeadImportIdParams } from '@/models/lead-import.model';
+import type { PipelineStageParams } from '@/models/pipeline.model';
 import type { ILeadImportService } from '@/services/lead-import.service';
 
 export class LeadImportController {
@@ -15,6 +16,16 @@ export class LeadImportController {
     const csvText: string = req.body;
     const loggedUserContext = this.requestContextExtractor.extractLoggedUserContext(req);
     const { importId } = await this.leadImportService.requestLeadImport(csvText, loggedUserContext);
+    res.status(HttpStatus.ACCEPTED).json({ message: LEAD_IMPORT_SUCCESS_MESSAGES.REQUESTED, importId });
+  };
+
+  requestLeadImportIntoPipeline = async (req: Request<PipelineStageParams>, res: Response) => {
+    const csvText: string = req.body;
+    const loggedUserContext = this.requestContextExtractor.extractLoggedUserContext(req);
+    const { importId } = await this.leadImportService.requestLeadImportIntoPipeline(
+      { targetPipelineId: req.params.pipelineId, targetStageId: req.params.stageId, csvText },
+      loggedUserContext,
+    );
     res.status(HttpStatus.ACCEPTED).json({ message: LEAD_IMPORT_SUCCESS_MESSAGES.REQUESTED, importId });
   };
 

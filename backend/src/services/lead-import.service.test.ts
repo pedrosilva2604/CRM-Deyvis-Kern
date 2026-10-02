@@ -5,6 +5,7 @@ import { TimeZoneBusinessCalendar } from '@/infra/business-calendar';
 import { FixedClock } from '@/testing/fixed-clock';
 import { InMemoryLeadImportQueue } from '@/testing/in-memory-lead-import.queue';
 import { InMemoryLeadImportRepository } from '@/testing/in-memory-lead-import.repository';
+import { InMemoryPipelineAccess } from '@/testing/in-memory-pipeline-access';
 import { loggedAdmin, loggedSeller } from '@/testing/logged-users';
 import { RecordingAuditService } from '@/testing/recording-audit.service';
 import { LeadImportService } from './lead-import.service';
@@ -15,14 +16,16 @@ function createRetryScenario() {
   const leadImports = new InMemoryLeadImportRepository();
   const leadImportQueue = new InMemoryLeadImportQueue();
   const audit = new RecordingAuditService();
+  const pipelines = new InMemoryPipelineAccess();
   const leadImportService = new LeadImportService(
     leadImports,
+    pipelines,
     leadImportQueue,
     audit,
     new TimeZoneBusinessCalendar(clock, 'America/Sao_Paulo'),
     { maximumRows: 10_000 },
   );
-  return { leadImportService, leadImports, leadImportQueue, audit };
+  return { leadImportService, leadImports, leadImportQueue, audit, pipelines };
 }
 
 afterEach(() => {

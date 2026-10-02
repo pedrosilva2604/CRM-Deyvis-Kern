@@ -24,6 +24,16 @@ export interface LeadImportToAdd {
   intoTestFunnel?: boolean;
 }
 
+export interface TestPipeline {
+  pipelineId: string;
+  stageIdByName: Record<string, string>;
+}
+
+export interface StageMarks {
+  wonStage?: string;
+  lostStage?: string;
+}
+
 export interface UserToAdd {
   role?: Role;
   active?: boolean;
@@ -138,6 +148,49 @@ export class TestDatabase {
       select: { id: true },
     });
     return leadImport.id;
+  }
+
+  async addPipeline(ownerId: string, stageNames: string[], { wonStage, lostStage }: StageMarks = {}): Promise<TestPipeline> {
+    const pipeline = await this.client.pipeline.create({
+      data: {
+        name: `Funil ${randomUUID().slice(0, 8)}`,
+        ownerId,
+        stages: {
+          create: stageNames.map((name, position) => ({ name, position, isWon: name === wonStage, isLost: name === lostStage })),
+        },
+      },
+      include: { stages: { orderBy: { position: 'asc' } } },
+    });
+    return {
+      pipelineId: pipeline.id,
+      stageIdByName: Object.fromEntries(pipeline.stages.map((stage) => [stage.name, stage.id])),
+    };
+  }
+
+  async addMember(pipelineId: string, userId: string): Promise<void> {
+    await this.client.pipelineMember.create({ data: { pipelineId, userId } });
+  }
+
+  async addCard(pipelineId: string, stageId: string, leadId: string, position: number): Promise<string> {
+    const card = await this.client.pipelineCard.create({ data: { pipelineId, stageId, leadId, position }, select: { id: true } });
+    return card.id;
+  }
+
+  async findLeadNamesInStageOrder(stageId: string): Promise<string[]> {
+    const cards = await this.client.pipelineCard.findMany({
+      where: { stageId },
+      orderBy: [{ position: 'asc' }, { id: 'asc' }],
+      select: { lead: { select: { name: true } } },
+    });
+    return cards.map(({ lead }) => lead.name);
+  }
+
+  async findCard(cardId: string) {
+    return await this.client.pipelineCard.findUniqueOrThrow({ where: { id: cardId } });
+  }
+
+  async findPipelinesOwnedBy(ownerId: string) {
+    return await this.client.pipeline.findMany({ where: { ownerId }, include: { stages: { orderBy: { position: 'asc' } } } });
   }
 
   async findLeadImport(importId: string) {

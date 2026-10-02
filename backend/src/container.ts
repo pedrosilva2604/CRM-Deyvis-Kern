@@ -53,6 +53,7 @@ import { LeadService } from '@/services/lead.service';
 import { MailService } from '@/services/mail.service';
 import { NotificationService } from '@/services/notification.service';
 import { PasswordResetService } from '@/services/password-reset.service';
+import { PipelineChangeAnnouncer } from '@/services/pipeline-change-announcer';
 import { PipelineService } from '@/services/pipeline.service';
 import { ProfileService } from '@/services/profile.service';
 import { SessionService } from '@/services/session.service';
@@ -129,16 +130,17 @@ const leadService = new LeadService(
   clock,
 );
 const leadIndicatorsService = new LeadIndicatorsService(leadIndicatorsRepository, businessCalendar);
-const leadImportService = new LeadImportService(leadImportRepository, leadImportQueue, auditService, businessCalendar, {
+const leadImportService = new LeadImportService(leadImportRepository, pipelineRepository, leadImportQueue, auditService, businessCalendar, {
   maximumRows: env.LEAD_IMPORT_MAX_ROWS,
 });
 
+const pipelineChangeAnnouncer = new PipelineChangeAnnouncer(pipelineRepository, realtimePublisher);
 const pipelineService = new PipelineService(
   pipelineRepository,
   pipelineCardRepository,
   leadRepository,
   notificationService,
-  realtimePublisher,
+  pipelineChangeAnnouncer,
   auditService,
   clock,
 );
@@ -184,7 +186,7 @@ const appRoutes = new AppRoutes(
       rateLimitMiddleware,
     ),
     notifications: new NotificationRoutes(notificationController, validationMiddleware),
-    pipelines: new PipelineRoutes(pipelineController, validationMiddleware),
+    pipelines: new PipelineRoutes(pipelineController, leadImportController, validationMiddleware, csvUploadMiddleware, rateLimitMiddleware),
   },
   authMiddleware,
   rateLimitMiddleware,

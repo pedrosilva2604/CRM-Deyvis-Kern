@@ -1,3 +1,5 @@
+import type { LeadImportDestination } from '@/models/lead-import.model';
+
 const integerFormatter = new Intl.NumberFormat('pt-BR');
 
 function formatLeadCount(quantity: number): string {
@@ -9,6 +11,9 @@ export interface CompletedLeadImportSummary {
   skippedExistingLeads: number;
   restoredLeads: number;
   skippedDeletedLeads: number;
+  addedToPipelineLeads: number;
+  alreadyInPipelineLeads: number;
+  destination: LeadImportDestination | null;
 }
 
 function describeCompletedLeadImport({
@@ -16,12 +21,19 @@ function describeCompletedLeadImport({
   skippedExistingLeads,
   restoredLeads,
   skippedDeletedLeads,
+  addedToPipelineLeads,
+  alreadyInPipelineLeads,
+  destination,
 }: CompletedLeadImportSummary): string {
   const sentences = [`${formatLeadCount(importedLeads)} importados para o CRM.`];
   if (restoredLeads > 0) sentences.push(`${formatLeadCount(restoredLeads)} que estavam excluídos foram restaurados.`);
   if (skippedExistingLeads > 0) sentences.push(`${formatLeadCount(skippedExistingLeads)} já existiam no CRM e foram ignorados.`);
   if (skippedDeletedLeads > 0) {
     sentences.push(`${formatLeadCount(skippedDeletedLeads)} pertencem a leads excluídos: peça a um administrador para restaurá-los.`);
+  }
+  if (destination !== null) sentences.push(`${formatLeadCount(addedToPipelineLeads)} entraram no funil.`);
+  if (alreadyInPipelineLeads > 0) {
+    sentences.push(`${formatLeadCount(alreadyInPipelineLeads)} já estavam no funil e continuaram onde estavam.`);
   }
   return sentences.join(' ');
 }

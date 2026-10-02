@@ -7,6 +7,8 @@ import type {
   FinishedLeadImport,
   LeadImportChunk,
   LeadImportChunkResult,
+  LeadImportDestination,
+  LeadImportOutcomeCounts,
   LeadImportProgress,
   LeadImportRowToProcess,
   LeadImportToProcess,
@@ -28,6 +30,8 @@ export interface StoredLeadImport {
   skippedExistingLeads: number;
   restoredLeads: number;
   skippedDeletedLeads: number;
+  addedToPipelineLeads: number;
+  alreadyInPipelineLeads: number;
   requesterIsAdmin: boolean;
   failureReason: string | null;
   createdAt: Date;
@@ -43,6 +47,7 @@ const RUNNING_STATUSES: LeadImportStatus[] = ['PENDING', 'PROCESSING'];
 export class InMemoryLeadImportRepository implements ILeadImportRepository {
   readonly phonesAlreadyInCrm = new Set<string>();
   readonly phonesOfDeletedLeads = new Set<string>();
+  readonly phonesInPipeline = new Set<string>();
   readonly phonesOfEachReceivedChunk: string[][] = [];
   private readonly storedImports = new Map<string, StoredLeadImport>();
   private createdImports = 0;
@@ -63,6 +68,8 @@ export class InMemoryLeadImportRepository implements ILeadImportRepository {
       skippedExistingLeads: 0,
       restoredLeads: 0,
       skippedDeletedLeads: 0,
+      addedToPipelineLeads: 0,
+      alreadyInPipelineLeads: 0,
       requesterIsAdmin: false,
       failureReason: null,
       createdAt: new Date(),
@@ -99,10 +106,8 @@ export class InMemoryLeadImportRepository implements ILeadImportRepository {
       duplicateRowsInFile: storedImport.duplicateRowsInFile,
       rowsToImport: storedImport.rowsToImport,
       processedRows: storedImport.processedRows,
-      importedLeads: storedImport.importedLeads,
-      skippedExistingLeads: storedImport.skippedExistingLeads,
-      restoredLeads: storedImport.restoredLeads,
-      skippedDeletedLeads: storedImport.skippedDeletedLeads,
+      ...this.outcomeCountsOf(storedImport),
+      importsIntoPipeline: this.destinationOf(storedImport) !== null,
       createdAt: storedImport.createdAt,
       finishedAt: storedImport.finishedAt,
     };
@@ -123,14 +128,10 @@ export class InMemoryLeadImportRepository implements ILeadImportRepository {
       importId: storedImport.importId,
       requestedById: storedImport.requestedById,
       restoresDeletedLeads: storedImport.requesterIsAdmin,
-      pipelineId: storedImport.pipelineId,
-      stageId: storedImport.stageId,
+      destination: this.destinationOf(storedImport),
       rowsToImport: storedImport.rowsToImport,
       processedRows: storedImport.processedRows,
-      importedLeads: storedImport.importedLeads,
-      skippedExistingLeads: storedImport.skippedExistingLeads,
-      restoredLeads: storedImport.restoredLeads,
-      skippedDeletedLeads: storedImport.skippedDeletedLeads,
+      ...this.outcomeCountsOf(storedImport),
     };
   }
 
@@ -138,7 +139,7 @@ export class InMemoryLeadImportRepository implements ILeadImportRepository {
     return this.find(importId).rows.slice(alreadyProcessedRows, alreadyProcessedRows + chunkSize);
   }
 
-  async importChunk({ importId, processedRowsBefore, restoresDeletedLeads, leadsToCreate }: LeadImportChunk): Promise<LeadImportChunkResult> {
+  async importChunk({ importId, processedRowsBefore, restoresDeletedLeads, destination, leadsToCreate }: LeadImportChunk): Promise<LeadImportChunkResult> {
     const storedImport = this.find(importId);
     if (storedImport.status !== 'PROCESSING' || storedImport.processedRows !== processedRowsBefore) {
       throw new LeadImportChunkAlreadyProcessedError(importId);
@@ -155,8 +156,12 @@ export class InMemoryLeadImportRepository implements ILeadImportRepository {
     storedImport.restoredLeads += restoredLeads;
     storedImport.skippedDeletedLeads += skippedDeletedLeads;
     storedImport.skippedExistingLeads += leadsToCreate.length - newLeads.length - restoredLeads - skippedDeletedLeads;
-    return { insertedLeads: newLeads.length, restoredLeads, skippedDeletedLeads };
+    const pipelinePlacement = destination ? this.placeInPipeline(leadsToCreate) : { addedToPipelineLeads: 0, alreadyInPipelineLeads: 0 };
+    storedImport.addedToPipelineLeads += pipelinePlacement.addedToPipelineLeads;
+    storedImport.alreadyInPipelineLeads += pipelinePlacement.alreadyInPipelineLeads;
+    return { insertedLeads: newLeads.length, restoredLeads, skippedDeletedLeads, ...pipelinePlacement };
   }
+
   async completeLeadImport(importId: string, finishedAt: Date): Promise<FinishedLeadImport | null> {
     const storedImport = this.find(importId);
     if (storedImport.status !== 'PROCESSING') return null;
@@ -237,11 +242,32 @@ export class InMemoryLeadImportRepository implements ILeadImportRepository {
     return {
       importId: storedImport.importId,
       requestedById: storedImport.requestedById,
+      destination: this.destinationOf(storedImport),
+      ...this.outcomeCountsOf(storedImport),
+      finishedAt: storedImport.finishedAt ?? new Date(),
+    };
+  }
+
+  private outcomeCountsOf(storedImport: StoredLeadImport): LeadImportOutcomeCounts {
+    return {
       importedLeads: storedImport.importedLeads,
       skippedExistingLeads: storedImport.skippedExistingLeads,
       restoredLeads: storedImport.restoredLeads,
       skippedDeletedLeads: storedImport.skippedDeletedLeads,
-      finishedAt: storedImport.finishedAt ?? new Date(),
+      addedToPipelineLeads: storedImport.addedToPipelineLeads,
+      alreadyInPipelineLeads: storedImport.alreadyInPipelineLeads,
     };
+  }
+
+  private destinationOf(storedImport: StoredLeadImport): LeadImportDestination | null {
+    if (storedImport.pipelineId === null || storedImport.stageId === null) return null;
+    return { pipelineId: storedImport.pipelineId, stageId: storedImport.stageId };
+  }
+
+  private placeInPipeline(rows: LeadImportRowToProcess[]) {
+    const phonesOfActiveLeads = rows.map((row) => row.phone).filter((phone) => this.phonesAlreadyInCrm.has(phone));
+    const newInPipeline = phonesOfActiveLeads.filter((phone) => !this.phonesInPipeline.has(phone));
+    newInPipeline.forEach((phone) => this.phonesInPipeline.add(phone));
+    return { addedToPipelineLeads: newInPipeline.length, alreadyInPipelineLeads: phonesOfActiveLeads.length - newInPipeline.length };
   }
 }

@@ -3,6 +3,7 @@ import type { LeadImportCounters, LeadImportRowToProcess } from '@/models/lead-i
 import { FixedClock } from '@/testing/fixed-clock';
 import { InMemoryLeadImportRepository } from '@/testing/in-memory-lead-import.repository';
 import { RecordingLeadImportNotifications } from '@/testing/recording-lead-import-notifications';
+import { RecordingPipelineChangeAnnouncer } from '@/testing/recording-pipeline-change-announcer';
 import { RecordingRealtimePublisher } from '@/testing/recording-realtime-publisher';
 import { LeadImportProcessingService } from './lead-import-processing.service';
 
@@ -17,14 +18,15 @@ function createProcessingScenario() {
   const leadImports = new InMemoryLeadImportRepository();
   const notifications = new RecordingLeadImportNotifications();
   const realtimePublisher = new RecordingRealtimePublisher();
-  const processing = new LeadImportProcessingService(leadImports, notifications, realtimePublisher, clock, {
+  const pipelineChanges = new RecordingPipelineChangeAnnouncer();
+  const processing = new LeadImportProcessingService(leadImports, notifications, realtimePublisher, pipelineChanges, clock, {
     chunkSize: CHUNK_SIZE,
   });
   const reportedProgress: LeadImportCounters[] = [];
   const reportProgress = async (counters: LeadImportCounters) => {
     reportedProgress.push(counters);
   };
-  return { processing, leadImports, notifications, realtimePublisher, reportedProgress, reportProgress };
+  return { processing, leadImports, notifications, realtimePublisher, pipelineChanges, reportedProgress, reportProgress };
 }
 
 describe('Processamento da importação', () => {
@@ -43,6 +45,8 @@ describe('Processamento da importação', () => {
         skippedExistingLeads: 0,
         restoredLeads: 0,
         skippedDeletedLeads: 0,
+        addedToPipelineLeads: 0,
+        alreadyInPipelineLeads: 0,
       },
     });
     expect(leadImports.find('importacao')).toMatchObject({ status: 'COMPLETED', rows: [] });

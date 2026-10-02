@@ -7,11 +7,13 @@ import {
   type FinishedLeadImport,
   type LeadImportChunk,
   type LeadImportChunkResult,
+  type LeadImportDestination,
   type LeadImportProgress,
   type LeadImportRowToProcess,
   type LeadImportToProcess,
 } from '@/models/lead-import.model';
 import type { DatabaseClient, DatabaseTransaction } from '@/repositories/database-client';
+import { CARD_POSITION_GAP } from '@/repositories/pipeline-card.repository';
 
 export interface ILeadImportRepository {
   createLeadImport(newLeadImport: CreateLeadImportData): Promise<string>;
@@ -52,6 +54,13 @@ interface RowsHeldByDeletedLeads {
   rowCount: number;
   deletedLeads: DeletedLeadOfRow[];
 }
+
+interface PipelinePlacement {
+  addedToPipelineLeads: number;
+  alreadyInPipelineLeads: number;
+}
+
+const NOTHING_PLACED_IN_PIPELINE: PipelinePlacement = { addedToPipelineLeads: 0, alreadyInPipelineLeads: 0 };
 
 function holdsContactOf(lead: LeadContactRecord, row: LeadImportRowToProcess): boolean {
   return lead.phone === row.phone || (row.email !== null && lead.email === row.email);
@@ -120,7 +129,14 @@ export class LeadImportRepository implements ILeadImportRepository {
     });
   }
 
-  async importChunk({ importId, processedRowsBefore, restoresDeletedLeads, leadsToCreate }: LeadImportChunk): Promise<LeadImportChunkResult> {
+  async importChunk({
+    importId,
+    processedRowsBefore,
+    restoresDeletedLeads,
+    destination,
+    addedById,
+    leadsToCreate,
+  }: LeadImportChunk): Promise<LeadImportChunkResult> {
     return await this.prisma.$transaction(async (transaction) => {
       const insertedLeads = await transaction.lead.createManyAndReturn({
         data: leadsToCreate,
@@ -136,11 +152,15 @@ export class LeadImportRepository implements ILeadImportRepository {
         restoresDeletedLeads,
       );
       if (restoresDeletedLeads) await this.restoreDeletedLeads(transaction, importId, rowsHeldByDeletedLeads.deletedLeads);
+      const pipelinePlacement = destination
+        ? await this.placeLeadsOfRowsInPipeline(transaction, destination, leadsToCreate, addedById)
+        : NOTHING_PLACED_IN_PIPELINE;
 
       const chunkResult: LeadImportChunkResult = {
         insertedLeads: insertedLeads.length,
         restoredLeads: restoresDeletedLeads ? rowsHeldByDeletedLeads.deletedLeads.length : 0,
         skippedDeletedLeads: restoresDeletedLeads ? 0 : rowsHeldByDeletedLeads.rowCount,
+        ...pipelinePlacement,
       };
       const advanced = await transaction.leadImport.updateMany({
         where: { id: importId, status: LeadImportStatus.PROCESSING, processedRows: processedRowsBefore },
@@ -152,6 +172,8 @@ export class LeadImportRepository implements ILeadImportRepository {
           },
           restoredLeads: { increment: chunkResult.restoredLeads },
           skippedDeletedLeads: { increment: chunkResult.skippedDeletedLeads },
+          addedToPipelineLeads: { increment: chunkResult.addedToPipelineLeads },
+          alreadyInPipelineLeads: { increment: chunkResult.alreadyInPipelineLeads },
         },
       });
       if (advanced.count === 0) throw new LeadImportChunkAlreadyProcessedError(importId);
@@ -295,6 +317,45 @@ export class LeadImportRepository implements ILeadImportRepository {
         data: { deletedAt: null, ...(keepsCurrentPhone ? {} : newPhone) },
       });
     }
+  }
+
+  private async placeLeadsOfRowsInPipeline(
+    transaction: DatabaseTransaction,
+    { pipelineId, stageId }: LeadImportDestination,
+    rows: LeadImportRowToProcess[],
+    addedById: string | null,
+  ): Promise<PipelinePlacement> {
+    const leadIdsOfRows = await this.findActiveLeadIdsOfRows(transaction, rows);
+    if (leadIdsOfRows.length === 0) return NOTHING_PLACED_IN_PIPELINE;
+    const firstCard = await transaction.pipelineCard.findFirst({ where: { stageId }, orderBy: { position: 'asc' }, select: { position: true } });
+    const topPosition = firstCard?.position ?? 0;
+    const placement = await transaction.pipelineCard.createMany({
+      data: leadIdsOfRows.map((leadId, leadIndex) => ({
+        pipelineId,
+        stageId,
+        leadId,
+        addedById,
+        position: topPosition - CARD_POSITION_GAP * (leadIndex + 1),
+      })),
+      skipDuplicates: true,
+    });
+    return { addedToPipelineLeads: placement.count, alreadyInPipelineLeads: leadIdsOfRows.length - placement.count };
+  }
+
+  private async findActiveLeadIdsOfRows(transaction: DatabaseTransaction, rows: LeadImportRowToProcess[]): Promise<string[]> {
+    const emails = rows.flatMap((row) => (row.email ? [row.email] : []));
+    const activeLeads = await transaction.lead.findMany({
+      where: { deletedAt: null, OR: [{ phone: { in: rows.map((row) => row.phone) } }, { email: { in: emails } }] },
+      select: { id: true, phone: true, email: true },
+    });
+    const leadIds = new Set<string>();
+    for (const row of rows) {
+      const leadOfRow =
+        activeLeads.find((lead) => lead.phone === row.phone) ??
+        activeLeads.find((lead) => row.email !== null && lead.email === row.email);
+      if (leadOfRow) leadIds.add(leadOfRow.id);
+    }
+    return [...leadIds].sort();
   }
 
   private async isPhoneInSpreadsheet(transaction: DatabaseTransaction, importId: string, phone: string): Promise<boolean> {

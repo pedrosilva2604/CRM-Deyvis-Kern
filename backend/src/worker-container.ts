@@ -7,10 +7,12 @@ import { MaintenanceScheduler } from '@/queues/maintenance.queue';
 import { createDatabaseClient } from '@/repositories/database-client';
 import { LeadImportRepository } from '@/repositories/lead-import.repository';
 import { NotificationRepository } from '@/repositories/notification.repository';
+import { PipelineRepository } from '@/repositories/pipeline.repository';
 import { LeadImportMaintenanceService } from '@/services/lead-import-maintenance.service';
 import { LeadImportNotificationService } from '@/services/lead-import-notification.service';
 import { LeadImportProcessingService } from '@/services/lead-import-processing.service';
 import { NotificationService } from '@/services/notification.service';
+import { PipelineChangeAnnouncer } from '@/services/pipeline-change-announcer';
 import { LeadImportWorker } from '@/workers/lead-import.worker';
 import { MaintenanceWorker } from '@/workers/maintenance.worker';
 
@@ -21,6 +23,7 @@ const clock = new SystemClock();
 const realtimePublisher = new RedisRealtimePublisher(workerRedisClient);
 const leadImportRepository = new LeadImportRepository(prisma);
 const notificationRepository = new NotificationRepository(prisma);
+const pipelineRepository = new PipelineRepository(prisma);
 export const leadImportQueue = new BullMqLeadImportQueue(workerRedisClient, {
   attempts: env.LEAD_IMPORT_JOB_ATTEMPTS,
   retryDelayMs: env.LEAD_IMPORT_RETRY_DELAY_MS,
@@ -37,6 +40,7 @@ const leadImportProcessingService = new LeadImportProcessingService(
   leadImportRepository,
   leadImportNotificationService,
   realtimePublisher,
+  new PipelineChangeAnnouncer(pipelineRepository, realtimePublisher),
   clock,
   { chunkSize: env.LEAD_IMPORT_CHUNK_SIZE },
 );

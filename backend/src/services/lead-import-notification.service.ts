@@ -47,6 +47,11 @@ export class LeadImportNotificationService implements ILeadImportNotificationSer
     await this.notifyRequester(finishedImport, NotificationType.LEAD_IMPORT_EXPIRED, title, message());
   }
 
+  private trackingLinkOf({ importId, destination }: FinishedLeadImport): string {
+    if (destination) return `/kanban?funil=${destination.pipelineId}&importacao=${importId}`;
+    return `/leads?importacao=${importId}`;
+  }
+
   private describeRetryDeadline({ finishedAt }: FinishedLeadImport): string {
     return this.dateFormatter.format(new Date(finishedAt.getTime() + this.settings.failedRetentionDays * DAY_MS));
   }
@@ -62,7 +67,7 @@ export class LeadImportNotificationService implements ILeadImportNotificationSer
       type,
       title,
       message,
-      actionUrl: `/leads?importacao=${finishedImport.importId}`,
+      actionUrl: this.trackingLinkOf(finishedImport),
     });
   }
 }

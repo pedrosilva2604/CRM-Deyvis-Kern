@@ -3,7 +3,6 @@ import { PIPELINE_NOTIFICATION_MESSAGES } from '@/constants/notification-message
 import { BadRequestError, ForbiddenError, NotFoundError } from '@/errors/app-errors';
 import { LEAD_ERRORS, PIPELINE_ERRORS } from '@/errors/errors.constants';
 import type { Clock } from '@/infra/clock';
-import { REALTIME_EVENTS, type IRealtimePublisher } from '@/infra/realtime-events';
 import type { AuditLogInput } from '@/models/audit.model';
 import type { LoggedUserContext } from '@/models/common.model';
 import type {
@@ -33,6 +32,7 @@ import type { IPipelineCardRepository } from '@/repositories/pipeline-card.repos
 import type { IPipelineRepository, PipelineViewer } from '@/repositories/pipeline.repository';
 import type { IAuditService } from './audit.service';
 import type { INotificationService } from './notification.service';
+import type { IPipelineChangeAnnouncer } from './pipeline-change-announcer';
 
 export interface IPipelineService {
   listPipelines(loggedUserContext: LoggedUserContext): Promise<PipelineOutput[]>;
@@ -60,7 +60,7 @@ export class PipelineService implements IPipelineService {
     private readonly cardRepository: IPipelineCardRepository,
     private readonly leadRepository: ILeadRepository,
     private readonly notifications: INotificationService,
-    private readonly realtimePublisher: IRealtimePublisher,
+    private readonly pipelineChanges: IPipelineChangeAnnouncer,
     private readonly audit: IAuditService,
     private readonly clock: Clock,
   ) {}
@@ -87,15 +87,15 @@ export class PipelineService implements IPipelineService {
     await this.findManagingAccessOrFail(targetPipelineId, loggedUserContext);
     await this.pipelineRepository.renamePipeline(targetPipelineId, name);
     await this.recordPipelineAuditLog(loggedUserContext, 'pipeline.rename', targetPipelineId, { name });
-    await this.announcePipelineChange(targetPipelineId);
+    await this.pipelineChanges.announce(targetPipelineId);
   }
 
   async deletePipeline({ targetPipelineId }: PipelineRequest, loggedUserContext: LoggedUserContext): Promise<void> {
     await this.findManagingAccessOrFail(targetPipelineId, loggedUserContext);
-    const peopleWithAccess = await this.pipelineRepository.findPeopleWithAccess(targetPipelineId);
+    const peopleWithAccess = await this.pipelineChanges.findAudience(targetPipelineId);
     await this.pipelineRepository.deletePipeline(targetPipelineId);
     await this.recordPipelineAuditLog(loggedUserContext, 'pipeline.delete', targetPipelineId, undefined);
-    await this.announceToPeople(peopleWithAccess, targetPipelineId);
+    await this.pipelineChanges.announceTo(peopleWithAccess, targetPipelineId);
   }
 
   async listInvitableUsers({ targetPipelineId }: PipelineRequest, loggedUserContext: LoggedUserContext): Promise<PipelinePersonOutput[]> {
@@ -113,25 +113,25 @@ export class PipelineService implements IPipelineService {
     await this.pipelineRepository.addMember(targetPipelineId, targetUserId, loggedUserContext.loggedUser.id);
     await this.recordPipelineAuditLog(loggedUserContext, 'pipeline.member_add', targetPipelineId, { userId: targetUserId });
     await this.notifyNewMember(targetPipelineId, targetUserId);
-    await this.announcePipelineChange(targetPipelineId);
+    await this.pipelineChanges.announce(targetPipelineId);
   }
 
   async removeMember({ targetPipelineId, targetUserId }: PipelineMemberRequest, loggedUserContext: LoggedUserContext): Promise<void> {
     const access = await this.findAccessOrFail(targetPipelineId, loggedUserContext);
     const isLeaving = targetUserId === loggedUserContext.loggedUser.id;
     if (!isLeaving) this.assertCanManage(access);
-    const peopleWithAccess = await this.pipelineRepository.findPeopleWithAccess(targetPipelineId);
+    const peopleWithAccess = await this.pipelineChanges.findAudience(targetPipelineId);
 
     const wasRemoved = await this.pipelineRepository.removeMember(targetPipelineId, targetUserId);
     if (!wasRemoved) throw new NotFoundError(PIPELINE_ERRORS.MEMBER_NOT_FOUND);
     await this.recordPipelineAuditLog(loggedUserContext, 'pipeline.member_remove', targetPipelineId, { userId: targetUserId });
-    await this.announceToPeople(peopleWithAccess, targetPipelineId);
+    await this.pipelineChanges.announceTo(peopleWithAccess, targetPipelineId);
   }
 
   async createStage({ targetPipelineId, stage }: CreateStageRequest, loggedUserContext: LoggedUserContext): Promise<void> {
     await this.findAccessOrFail(targetPipelineId, loggedUserContext);
     await this.pipelineRepository.createStage(targetPipelineId, stage);
-    await this.announcePipelineChange(targetPipelineId);
+    await this.pipelineChanges.announce(targetPipelineId);
   }
 
   async updateStage(
@@ -145,7 +145,7 @@ export class PipelineService implements IPipelineService {
       ...(stageChanges.isWon === true && { isLost: false }),
       ...(stageChanges.isLost === true && { isWon: false }),
     });
-    await this.announcePipelineChange(targetPipelineId);
+    await this.pipelineChanges.announce(targetPipelineId);
   }
 
   async reorderStages({ targetPipelineId, stageIds }: ReorderStagesRequest, loggedUserContext: LoggedUserContext): Promise<void> {
@@ -158,7 +158,7 @@ export class PipelineService implements IPipelineService {
     if (!isSameSetOfStages) throw new BadRequestError(PIPELINE_ERRORS.STAGE_ORDER_INVALID);
 
     await this.pipelineRepository.reorderStages(stageIds);
-    await this.announcePipelineChange(targetPipelineId);
+    await this.pipelineChanges.announce(targetPipelineId);
   }
 
   async deleteStage(
@@ -178,7 +178,7 @@ export class PipelineService implements IPipelineService {
       stageId: targetStageId,
       cardsMovedToStageId: moveCardsToStageId,
     });
-    await this.announcePipelineChange(targetPipelineId);
+    await this.pipelineChanges.announce(targetPipelineId);
   }
 
   async listStageCards({ targetPipelineId, targetStageId, query }: StageCardsRequest, loggedUserContext: LoggedUserContext): Promise<StageCardsPage> {
@@ -199,7 +199,7 @@ export class PipelineService implements IPipelineService {
       addedById: loggedUserContext.loggedUser.id,
     });
     await this.recordPipelineAuditLog(loggedUserContext, 'pipeline.card_add', targetPipelineId, { leadId: card.leadId, stageId: card.stageId });
-    await this.announcePipelineChange(targetPipelineId);
+    await this.pipelineChanges.announce(targetPipelineId);
   }
 
   async moveCard({ targetPipelineId, targetCardId, move }: MoveCardRequest, loggedUserContext: LoggedUserContext): Promise<void> {
@@ -221,7 +221,7 @@ export class PipelineService implements IPipelineService {
         toStageId: destinationStage.id,
       });
     }
-    await this.announcePipelineChange(targetPipelineId);
+    await this.pipelineChanges.announce(targetPipelineId);
   }
 
   async removeCard({ targetPipelineId, targetCardId }: RemoveCardRequest, loggedUserContext: LoggedUserContext): Promise<void> {
@@ -229,7 +229,7 @@ export class PipelineService implements IPipelineService {
     const card = await this.findCardOfPipelineOrFail(targetPipelineId, targetCardId);
     await this.cardRepository.removeCard(targetCardId);
     await this.recordPipelineAuditLog(loggedUserContext, 'pipeline.card_remove', targetPipelineId, { leadId: card.leadId });
-    await this.announcePipelineChange(targetPipelineId);
+    await this.pipelineChanges.announce(targetPipelineId);
   }
 
   private decideClosing(destinationStage: StageRecord, { wonValue, closingNote }: MoveCardInput): CardClosing {
@@ -294,16 +294,6 @@ export class PipelineService implements IPipelineService {
       message: message(pipeline.name),
       actionUrl: `/kanban?funil=${pipelineId}`,
     });
-  }
-
-  private async announcePipelineChange(pipelineId: string): Promise<void> {
-    await this.announceToPeople(await this.pipelineRepository.findPeopleWithAccess(pipelineId), pipelineId);
-  }
-
-  private async announceToPeople(peopleIds: string[], pipelineId: string): Promise<void> {
-    await Promise.all(
-      peopleIds.map((personId) => this.realtimePublisher.publishToUser(personId, REALTIME_EVENTS.PIPELINE_CHANGED, { pipelineId })),
-    );
   }
 
   private async recordPipelineAuditLog(
