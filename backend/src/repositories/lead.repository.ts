@@ -5,7 +5,7 @@ import {
   toLeadOutput,
   UNASSIGNED_LEADS_FILTER,
   type CreateLeadData,
-  type DeletedLeadHoldingContact,
+  type LeadHoldingContact,
   type LeadContact,
   type LeadListPage,
   type LeadListQuery,
@@ -24,7 +24,7 @@ export interface ILeadRepository {
   createLead(newLead: CreateLeadData): Promise<LeadOutput>;
   updateLead(leadId: string, leadChanges: UpdateLeadData): Promise<void>;
   softDeleteLead(leadId: string, deletedAt: Date): Promise<void>;
-  findDeletedLeadHoldingContact(contact: LeadContact): Promise<DeletedLeadHoldingContact | null>;
+  findLeadHoldingContact(contact: LeadContact, ignoredLeadId: string | null): Promise<LeadHoldingContact | null>;
   restoreDeletedLead(leadId: string): Promise<boolean>;
 }
 
@@ -103,18 +103,23 @@ export class LeadRepository implements ILeadRepository {
     await this.prisma.lead.update({ where: { id: leadId }, data: { deletedAt } });
   }
 
-  async findDeletedLeadHoldingContact({ phone, email }: LeadContact): Promise<DeletedLeadHoldingContact | null> {
+  async findLeadHoldingContact({ phone, email }: LeadContact, ignoredLeadId: string | null): Promise<LeadHoldingContact | null> {
     const contactMatches: Prisma.LeadWhereInput[] = [];
     if (phone) contactMatches.push({ phone });
     if (email) contactMatches.push({ email });
     if (contactMatches.length === 0) return null;
 
-    const deletedLead = await this.prisma.lead.findFirst({
-      where: { deletedAt: { not: null }, OR: contactMatches },
-      select: { id: true, phone: true },
+    const leadsHoldingContact = await this.prisma.lead.findMany({
+      where: { OR: contactMatches, ...(ignoredLeadId !== null && { id: { not: ignoredLeadId } }) },
+      select: { id: true, phone: true, deletedAt: true },
     });
-    if (!deletedLead) return null;
-    return { leadId: deletedLead.id, heldContact: deletedLead.phone === phone ? 'phone' : 'email' };
+    const holder = leadsHoldingContact.find((lead) => lead.deletedAt === null) ?? leadsHoldingContact[0];
+    if (!holder) return null;
+    return {
+      leadId: holder.id,
+      heldContact: holder.phone === phone ? 'phone' : 'email',
+      isDeleted: holder.deletedAt !== null,
+    };
   }
 
   async restoreDeletedLead(leadId: string): Promise<boolean> {

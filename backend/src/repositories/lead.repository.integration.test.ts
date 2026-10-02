@@ -84,31 +84,43 @@ describe('Busca de leads por telefone', () => {
   });
 });
 
-describe('Lead excluído que ainda segura o telefone ou o e-mail', () => {
-  it('encontra o lead excluído que tem o telefone', async () => {
+describe('Quem já tem o telefone ou o e-mail', () => {
+  it('aponta o lead excluído que tem o telefone', async () => {
     const deletedLead = await database.addLead({ name: 'Excluído', phone: '+5511900000001', deleted: true });
 
-    expect(await leads.findDeletedLeadHoldingContact({ phone: '+5511900000001' })).toEqual({
+    expect(await leads.findLeadHoldingContact({ phone: '+5511900000001' }, null)).toEqual({
       leadId: deletedLead,
       heldContact: 'phone',
+      isDeleted: true,
     });
   });
 
-  it('encontra o lead excluído que tem o e-mail', async () => {
+  it('aponta o lead excluído que tem o e-mail', async () => {
     const deletedLead = await database.addLead({ name: 'Excluído', phone: '+5511900000001', email: 'ana@empresa.com', deleted: true });
 
-    expect(await leads.findDeletedLeadHoldingContact({ phone: '+5511900000099', email: 'ana@empresa.com' })).toEqual({
+    expect(await leads.findLeadHoldingContact({ phone: '+5511900000099', email: 'ana@empresa.com' }, null)).toEqual({
       leadId: deletedLead,
       heldContact: 'email',
+      isDeleted: true,
     });
   });
 
-  it('não aponta lead ativo, porque esse caso já é o "telefone em uso" de sempre', async () => {
-    await database.addLead({ name: 'Ativo', phone: '+5511900000001' });
+  it('com telefone de lead ativo e e-mail de lead excluído, aponta o ativo: restaurar não destravaria o cadastro', async () => {
+    const maria = await database.addLead({ name: 'Maria (ativa)', phone: '+5511900000001' });
+    await database.addLead({ name: 'João (excluído)', phone: '+5511900000002', email: 'joao@empresa.com', deleted: true });
 
-    expect(await leads.findDeletedLeadHoldingContact({ phone: '+5511900000001' })).toBeNull();
+    expect(await leads.findLeadHoldingContact({ phone: '+5511900000001', email: 'joao@empresa.com' }, null)).toEqual({
+      leadId: maria,
+      heldContact: 'phone',
+      isDeleted: false,
+    });
   });
 
+  it('na edição, ignora o próprio lead', async () => {
+    const maria = await database.addLead({ name: 'Maria', phone: '+5511900000001', email: 'maria@empresa.com' });
+
+    expect(await leads.findLeadHoldingContact({ email: 'maria@empresa.com' }, maria)).toBeNull();
+  });
   it('restaura o lead excluído com o histórico dele', async () => {
     const deletedLead = await database.addLead({ name: 'Excluído', phone: '+5511900000001', deleted: true });
 

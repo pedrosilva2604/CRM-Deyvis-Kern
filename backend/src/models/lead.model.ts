@@ -144,9 +144,10 @@ export interface LeadContact {
   email?: string | null;
 }
 
-export interface DeletedLeadHoldingContact {
+export interface LeadHoldingContact {
   leadId: string;
   heldContact: 'phone' | 'email';
+  isDeleted: boolean;
 }
 
 export interface RestoreLeadRequest {
