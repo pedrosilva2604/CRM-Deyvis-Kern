@@ -22,6 +22,8 @@ export const LEAD_ERRORS = {
   PHONE_IN_USE_ASK_ADMIN: 'Este telefone já está em uso. Fale com um administrador.',
   EMAIL_IN_USE_ASK_ADMIN: 'Este e-mail já está em uso. Fale com um administrador.',
   DELETED_LEAD_NOT_FOUND: 'Lead excluído não encontrado',
+  PHONE_OF_DELETED_LEAD_ON_EDIT: 'Este telefone pertence a um lead excluído e não pode ser usado em outro lead.',
+  EMAIL_OF_DELETED_LEAD_ON_EDIT: 'Este e-mail pertence a um lead excluído e não pode ser usado em outro lead.',
 } as const;
 
 export const LEAD_IMPORT_ERRORS = {

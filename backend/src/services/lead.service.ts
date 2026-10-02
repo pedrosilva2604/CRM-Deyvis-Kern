@@ -49,6 +49,11 @@ const MESSAGE_FOR_ADMIN_BY_HELD_CONTACT: Record<LeadHoldingContact['heldContact'
   email: LEAD_ERRORS.EMAIL_HELD_BY_DELETED_LEAD,
 };
 
+const MESSAGE_ON_EDIT_BY_CONTACT_HELD_BY_DELETED_LEAD: Record<LeadHoldingContact['heldContact'], string> = {
+  phone: LEAD_ERRORS.PHONE_OF_DELETED_LEAD_ON_EDIT,
+  email: LEAD_ERRORS.EMAIL_OF_DELETED_LEAD_ON_EDIT,
+};
+
 const MESSAGE_FOR_SELLER_BY_HELD_CONTACT: Record<LeadHoldingContact['heldContact'], string> = {
   phone: LEAD_ERRORS.PHONE_IN_USE_ASK_ADMIN,
   email: LEAD_ERRORS.EMAIL_IN_USE_ASK_ADMIN,
@@ -174,6 +179,7 @@ export class LeadService implements ILeadService {
     const holder = await this.leadRepository.findLeadHoldingContact(contact, leadBeingEdited);
     if (!holder) return;
     if (!holder.isDeleted) throw new ConflictError(MESSAGE_BY_CONTACT_HELD_BY_ACTIVE_LEAD[holder.heldContact]);
+    if (leadBeingEdited !== null) throw new ConflictError(MESSAGE_ON_EDIT_BY_CONTACT_HELD_BY_DELETED_LEAD[holder.heldContact]);
     if (loggedUser.role === Role.ADMIN) {
       throw new DeletedLeadHoldsContactError(MESSAGE_FOR_ADMIN_BY_HELD_CONTACT[holder.heldContact], holder.leadId);
     }
