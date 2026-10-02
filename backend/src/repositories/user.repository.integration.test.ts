@@ -1,4 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { ConflictError } from '@/errors/app-errors';
+import { USER_ERRORS } from '@/errors/errors.constants';
 import { ORIGINAL_PASSWORD_HASH, TestDatabase } from '@/testing/integration/test-database';
 import { UserRepository } from './user.repository';
 
@@ -41,6 +43,17 @@ describe('Sempre sobra um administrador ativo', () => {
 
     expect(await users.updateUserKeepingAnActiveAdmin(ana, { role: 'AGENT' })).toBeNull();
     expect(await database.findUser(ana)).toMatchObject({ role: 'ADMIN' });
+  });
+
+  it('e-mail repetido dentro da transação também vira conflito (409) com a mensagem de e-mail em uso', async () => {
+    const ana = await database.addUser('Ana', { role: 'ADMIN' });
+    const bruno = await database.addUser('Bruno', { role: 'ADMIN' });
+    const emailOfAna = (await database.findUser(ana)).email;
+
+    const update = users.updateUserKeepingAnActiveAdmin(bruno, { email: emailOfAna });
+
+    await expect(update).rejects.toBeInstanceOf(ConflictError);
+    await expect(update).rejects.toThrow(USER_ERRORS.EMAIL_IN_USE);
   });
 
   it('deixa editar o nome do último admin ativo', async () => {

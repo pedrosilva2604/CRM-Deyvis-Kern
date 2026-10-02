@@ -154,7 +154,7 @@ export interface RestoreLeadRequest {
   targetLeadId: string;
 }
 
-export const notDeletedLeads ={ deletedAt: null } satisfies Prisma.LeadWhereInput;
+export const notDeletedLeads = { deletedAt: null } satisfies Prisma.LeadWhereInput;
 
 export const leadOutputRelations = {
   pipeline: { select: { id: true, name: true } },

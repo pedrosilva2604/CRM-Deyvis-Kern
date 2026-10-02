@@ -81,9 +81,9 @@ export class LeadImportService implements ILeadImportService {
       return await this.leadImportRepository.reopenFailedLeadImport(importId);
     } catch (error) {
       const isRequesterBusy = error instanceof ConflictError && error.message === LEAD_IMPORT_ERRORS.ALREADY_RUNNING;
+      if (!isRequesterBusy) throw error;
       const isRetriedByRequester = (await this.leadImportRepository.findLeadImportProgress(importId, loggedUser.id)) !== null;
-      if (isRequesterBusy && !isRetriedByRequester) throw new ConflictError(LEAD_IMPORT_ERRORS.REQUESTER_HAS_RUNNING_IMPORT);
-      throw error;
+      throw isRetriedByRequester ? error : new ConflictError(LEAD_IMPORT_ERRORS.REQUESTER_HAS_RUNNING_IMPORT);
     }
   }
 

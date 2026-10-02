@@ -272,6 +272,7 @@ export class LeadImportRepository implements ILeadImportRepository {
       await transaction.lead.update({ where: { id: deletedLeadId }, data: { deletedAt: null, ...newPhone } });
     }
   }
+
   private async findFinishedLeadImport(importId: string, finishedAt: Date): Promise<FinishedLeadImport | null> {
     const leadImport = await this.prisma.leadImport.findUnique({ where: { id: importId } });
     return leadImport ? toFinishedLeadImport(leadImport, finishedAt) : null;
