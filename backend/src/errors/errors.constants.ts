@@ -53,6 +53,7 @@ export const PIPELINE_ERRORS = {
   LAST_STAGE: 'O funil precisa ter ao menos uma etapa',
   TOO_MANY_STAGES: `O funil pode ter no máximo ${MAXIMUM_STAGES_PER_PIPELINE} etapas`,
   RECEIVING_STAGE_INVALID: 'Escolha outra etapa deste funil para receber os cartões',
+  STAGE_CHANGED_MEANWHILE: 'A etapa foi alterada por outra pessoa. Atualize o quadro e tente de novo',
   CARD_ONLY_INTO_OPEN_STAGE: 'Adicione o lead numa etapa aberta. Para ganhar ou perder, arraste o cartão',
   IMPORT_ONLY_INTO_OPEN_STAGE: 'Importe os leads numa etapa aberta. Para ganhar ou perder, arraste o cartão',
   STAGE_HAS_CARDS_WITHOUT_WON_VALUE: 'Há cartões sem valor de venda nesta etapa. Mova-os antes de marcá-la como ganho',

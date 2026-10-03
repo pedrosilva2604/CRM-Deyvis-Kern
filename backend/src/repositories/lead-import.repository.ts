@@ -13,7 +13,7 @@ import {
   type LeadImportToProcess,
 } from '@/models/lead-import.model';
 import type { DatabaseClient, DatabaseTransaction } from '@/repositories/database-client';
-import { CARD_POSITION_GAP, lockStagesForCardPlacement } from '@/repositories/pipeline-card.repository';
+import { CARD_POSITION_GAP, isOpenStage, lockStagesForCardPlacement } from '@/repositories/pipeline-card.repository';
 
 export interface ILeadImportRepository {
   createLeadImport(newLeadImport: CreateLeadImportData): Promise<string>;
@@ -334,8 +334,8 @@ export class LeadImportRepository implements ILeadImportRepository {
   ): Promise<PipelinePlacement> {
     const leadIdsOfRows = await this.findActiveLeadIdsOfRows(transaction, rows);
     if (leadIdsOfRows.length === 0) return NOTHING_PLACED_IN_PIPELINE;
-    const lockedStageIds = await lockStagesForCardPlacement(transaction, [destination.stageId]);
-    if (lockedStageIds.length === 0) return NOTHING_PLACED_IN_PIPELINE;
+    const [lockedStage] = await lockStagesForCardPlacement(transaction, [destination.stageId]);
+    if (!lockedStage || !isOpenStage(lockedStage)) return NOTHING_PLACED_IN_PIPELINE;
     const topPosition = await this.findTopPositionOfStage(transaction, destination.stageId);
     const addedToPipelineLeads = await this.addCardsAboveTop(transaction, { destination, leadIds: leadIdsOfRows, addedById, topPosition });
     return { addedToPipelineLeads, alreadyInPipelineLeads: leadIdsOfRows.length - addedToPipelineLeads };

@@ -1,6 +1,6 @@
 import { NotificationType, Role } from '@prisma/client';
 import { PIPELINE_NOTIFICATION_MESSAGES } from '@/constants/notification-messages';
-import { BadRequestError, ForbiddenError, NotFoundError } from '@/errors/app-errors';
+import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from '@/errors/app-errors';
 import { LEAD_ERRORS, PIPELINE_ERRORS } from '@/errors/errors.constants';
 import type { Clock } from '@/infra/clock';
 import type { AuditLogInput } from '@/models/audit.model';
@@ -196,12 +196,14 @@ export class PipelineService implements IPipelineService {
     if (stage.isWon || stage.isLost) throw new BadRequestError(PIPELINE_ERRORS.CARD_ONLY_INTO_OPEN_STAGE);
     if (!(await this.leadRepository.findLeadById(card.leadId))) throw new NotFoundError(LEAD_ERRORS.NOT_FOUND);
 
-    await this.cardRepository.addCardOnTop({
+    const cardPlacement = await this.cardRepository.addCardOnTop({
       pipelineId: targetPipelineId,
       stageId: card.stageId,
       leadId: card.leadId,
       addedById: loggedUserContext.loggedUser.id,
+      expectedStageKind: stage,
     });
+    if (cardPlacement === 'stageKindChanged') throw new ConflictError(PIPELINE_ERRORS.STAGE_CHANGED_MEANWHILE);
     await this.recordPipelineAuditLog(loggedUserContext, 'pipeline.card_add', targetPipelineId, { leadId: card.leadId, stageId: card.stageId });
     await this.pipelineChanges.announce(targetPipelineId);
   }
@@ -213,11 +215,13 @@ export class PipelineService implements IPipelineService {
     await this.assertPreviousCardIsInDestination(targetPipelineId, move, targetCardId);
     const changesStage = destinationStage.id !== card.stageId;
 
-    await this.cardRepository.moveCard(targetCardId, {
+    const cardPlacement = await this.cardRepository.moveCard(targetCardId, {
       stageId: destinationStage.id,
       previousCardId: move.previousCardId,
       closing: changesStage ? this.decideClosing(destinationStage, move) : undefined,
+      expectedStageKind: destinationStage,
     });
+    if (cardPlacement === 'stageKindChanged') throw new ConflictError(PIPELINE_ERRORS.STAGE_CHANGED_MEANWHILE);
     if (changesStage) {
       await this.recordPipelineAuditLog(loggedUserContext, 'pipeline.card_move', targetPipelineId, {
         leadId: card.leadId,

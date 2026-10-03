@@ -279,6 +279,23 @@ describe('Importação direto numa etapa do funil', () => {
     expect(await database.findLeadNamesInStageOrder(funnel.stageIdByName['Novo lead']!)).toEqual([]);
   });
 
+  it('se a etapa virou Ganho no meio da importação, os leads ficam só na base, sem falhar', async () => {
+    const maria = await database.addUser('Maria');
+    const funnel = await database.addPipeline(maria, ['Proposta']);
+    const proposalStage = funnel.stageIdByName['Proposta']!;
+    const importId = await database.addLeadImport({ requestedById: maria, status: 'PROCESSING' });
+    await database.client.stage.update({ where: { id: proposalStage }, data: { isWon: true } });
+
+    const chunkResult = await leadImports.importChunk({
+      ...chunkOf(importId, ['+5511900000001'], { importedBy: 'seller' }),
+      destination: { pipelineId: funnel.pipelineId, stageId: proposalStage },
+      addedById: maria,
+    });
+
+    expect(chunkResult).toMatchObject({ insertedLeads: 1, addedToPipelineLeads: 0 });
+    expect(await database.findLeadNamesInStageOrder(proposalStage)).toEqual([]);
+  });
+
   it('se o funil foi excluído no meio da importação, os leads ficam só na base, sem falhar', async () => {
     const maria = await database.addUser('Maria');
     const funnel = await database.addPipeline(maria, ['Novo lead']);

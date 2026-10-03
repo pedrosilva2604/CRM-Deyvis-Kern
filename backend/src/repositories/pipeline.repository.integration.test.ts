@@ -261,7 +261,7 @@ describe('Excluir um funil', () => {
 
       const [deletion, addition] = await Promise.allSettled([
         pipelines.deletePipeline(funnel.pipelineId),
-        cards.addCardOnTop({ pipelineId: funnel.pipelineId, stageId, leadId: leadArriving, addedById: maria }),
+        cards.addCardOnTop({ pipelineId: funnel.pipelineId, stageId, leadId: leadArriving, addedById: maria, expectedStageKind: { isWon: false, isLost: false } }),
       ]);
 
       if (deletion.status === 'rejected') unexpectedFailures.push(`exclusão: ${String(deletion.reason)}`);

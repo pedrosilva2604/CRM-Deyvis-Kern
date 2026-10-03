@@ -5,6 +5,7 @@ import {
   type PipelineCardRecord,
   type StageCardsPage,
   type StageCardsQuery,
+  type StageKind,
 } from '@/models/pipeline.model';
 import { NotFoundError } from '@/errors/app-errors';
 import { PIPELINE_ERRORS } from '@/errors/errors.constants';
@@ -15,19 +16,27 @@ export interface NewCard {
   stageId: string;
   leadId: string;
   addedById: string;
+  expectedStageKind: StageKind;
 }
 
 export interface CardDestination {
   stageId: string;
   previousCardId: string | null;
   closing: CardClosing | undefined;
+  expectedStageKind: StageKind;
+}
+
+export type CardPlacementOutcome = 'placed' | 'stageKindChanged';
+
+export interface LockedStage extends StageKind {
+  id: string;
 }
 
 export interface IPipelineCardRepository {
   findStageCardsPage(stageId: string, query: StageCardsQuery): Promise<StageCardsPage>;
   findCard(cardId: string): Promise<PipelineCardRecord | null>;
-  addCardOnTop(newCard: NewCard): Promise<void>;
-  moveCard(cardId: string, destination: CardDestination): Promise<void>;
+  addCardOnTop(newCard: NewCard): Promise<CardPlacementOutcome>;
+  moveCard(cardId: string, destination: CardDestination): Promise<CardPlacementOutcome>;
   removeCard(cardId: string): Promise<void>;
 }
 
@@ -36,16 +45,24 @@ const SMALLEST_GAP_BEFORE_RENUMBERING = 1e-6;
 
 const visibleCards = { lead: { deletedAt: null } };
 
-export async function lockStagesForCardPlacement(transaction: DatabaseTransaction, stageIds: string[]): Promise<string[]> {
+export async function lockStagesForCardPlacement(transaction: DatabaseTransaction, stageIds: string[]): Promise<LockedStage[]> {
   const stageIdsInLockOrder = [...stageIds].sort();
-  const lockedStages = await transaction.$queryRaw<{ id: string }[]>`
-    SELECT "id" FROM "Stage" WHERE "id" = ANY(${stageIdsInLockOrder}::uuid[]) ORDER BY "id" FOR UPDATE`;
-  return lockedStages.map((lockedStage) => lockedStage.id);
+  return await transaction.$queryRaw<LockedStage[]>`
+    SELECT "id", "isWon", "isLost" FROM "Stage" WHERE "id" = ANY(${stageIdsInLockOrder}::uuid[]) ORDER BY "id" FOR UPDATE`;
 }
 
-async function lockStageOrFail(transaction: DatabaseTransaction, stageId: string): Promise<void> {
-  const lockedStageIds = await lockStagesForCardPlacement(transaction, [stageId]);
-  if (lockedStageIds.length === 0) throw new NotFoundError(PIPELINE_ERRORS.STAGE_NOT_FOUND);
+export function isOpenStage({ isWon, isLost }: StageKind): boolean {
+  return !isWon && !isLost;
+}
+
+function isSameStageKind(lockedStage: StageKind, expectedStageKind: StageKind): boolean {
+  return lockedStage.isWon === expectedStageKind.isWon && lockedStage.isLost === expectedStageKind.isLost;
+}
+
+async function lockStageOrFail(transaction: DatabaseTransaction, stageId: string): Promise<LockedStage> {
+  const [lockedStage] = await lockStagesForCardPlacement(transaction, [stageId]);
+  if (!lockedStage) throw new NotFoundError(PIPELINE_ERRORS.STAGE_NOT_FOUND);
+  return lockedStage;
 }
 
 export class PipelineCardRepository implements IPipelineCardRepository {
@@ -77,22 +94,26 @@ export class PipelineCardRepository implements IPipelineCardRepository {
     });
   }
 
-  async addCardOnTop({ pipelineId, stageId, leadId, addedById }: NewCard): Promise<void> {
-    await this.prisma.$transaction(async (transaction) => {
-      await lockStageOrFail(transaction, stageId);
+  async addCardOnTop({ pipelineId, stageId, leadId, addedById, expectedStageKind }: NewCard): Promise<CardPlacementOutcome> {
+    return await this.prisma.$transaction(async (transaction) => {
+      const lockedStage = await lockStageOrFail(transaction, stageId);
+      if (!isSameStageKind(lockedStage, expectedStageKind)) return 'stageKindChanged';
       const position = await this.findPositionOnTop(transaction, stageId, null);
       await transaction.pipelineCard.create({ data: { pipelineId, stageId, leadId, addedById, position } });
+      return 'placed';
     });
   }
 
-  async moveCard(cardId: string, { stageId, previousCardId, closing }: CardDestination): Promise<void> {
-    await this.prisma.$transaction(async (transaction) => {
-      await lockStageOrFail(transaction, stageId);
+  async moveCard(cardId: string, { stageId, previousCardId, closing, expectedStageKind }: CardDestination): Promise<CardPlacementOutcome> {
+    return await this.prisma.$transaction(async (transaction) => {
+      const lockedStage = await lockStageOrFail(transaction, stageId);
+      if (!isSameStageKind(lockedStage, expectedStageKind)) return 'stageKindChanged';
       const position =
         previousCardId === null
           ? await this.findPositionOnTop(transaction, stageId, cardId)
           : await this.findPositionAfter(transaction, stageId, previousCardId, cardId);
       await transaction.pipelineCard.update({ where: { id: cardId }, data: { stageId, position, ...closing } });
+      return 'placed';
     });
   }
 

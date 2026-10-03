@@ -7,6 +7,7 @@ import { PipelineCardRepository } from './pipeline-card.repository';
 const database = new TestDatabase();
 const cards = new PipelineCardRepository(database.client);
 const keepClosing = undefined;
+const OPEN_STAGE = { isWon: false, isLost: false };
 
 let maria: string;
 let funnel: TestPipeline;
@@ -35,7 +36,7 @@ describe('Adicionar lead da base ao funil', () => {
     await addLeadWithCard('Ana', '+5511900000001', newStage, 1024);
     const bruno = await database.addLead({ name: 'Bruno', phone: '+5511900000002' });
 
-    await cards.addCardOnTop({ pipelineId: funnel.pipelineId, stageId: newStage, leadId: bruno, addedById: maria });
+    await cards.addCardOnTop({ pipelineId: funnel.pipelineId, stageId: newStage, leadId: bruno, addedById: maria, expectedStageKind: OPEN_STAGE });
 
     expect(await database.findLeadNamesInStageOrder(newStage)).toEqual(['Bruno', 'Ana']);
   });
@@ -47,7 +48,7 @@ describe('Adicionar lead da base ao funil', () => {
       ),
     );
 
-    await Promise.all(leadIds.map((leadId) => cards.addCardOnTop({ pipelineId: funnel.pipelineId, stageId: newStage, leadId, addedById: maria })));
+    await Promise.all(leadIds.map((leadId) => cards.addCardOnTop({ pipelineId: funnel.pipelineId, stageId: newStage, leadId, addedById: maria, expectedStageKind: OPEN_STAGE })));
 
     const positions = await database.findCardPositionsOfStage(newStage);
     expect(new Set(positions).size).toBe(leadIds.length);
@@ -55,9 +56,9 @@ describe('Adicionar lead da base ao funil', () => {
 
   it('não deixa o mesmo lead entrar duas vezes no mesmo funil', async () => {
     const ana = await database.addLead({ name: 'Ana', phone: '+5511900000001' });
-    await cards.addCardOnTop({ pipelineId: funnel.pipelineId, stageId: newStage, leadId: ana, addedById: maria });
+    await cards.addCardOnTop({ pipelineId: funnel.pipelineId, stageId: newStage, leadId: ana, addedById: maria, expectedStageKind: OPEN_STAGE });
 
-    const secondTime = cards.addCardOnTop({ pipelineId: funnel.pipelineId, stageId: proposalStage, leadId: ana, addedById: maria });
+    const secondTime = cards.addCardOnTop({ pipelineId: funnel.pipelineId, stageId: proposalStage, leadId: ana, addedById: maria, expectedStageKind: OPEN_STAGE });
 
     await expect(secondTime).rejects.toBeInstanceOf(ConflictError);
     await expect(secondTime).rejects.toThrow(PIPELINE_ERRORS.LEAD_ALREADY_IN_PIPELINE);
@@ -67,9 +68,9 @@ describe('Adicionar lead da base ao funil', () => {
     const joao = await database.addUser('João');
     const funnelOfJoao = await database.addPipeline(joao, ['Novo lead']);
     const ana = await database.addLead({ name: 'Ana', phone: '+5511900000001' });
-    await cards.addCardOnTop({ pipelineId: funnel.pipelineId, stageId: newStage, leadId: ana, addedById: maria });
+    await cards.addCardOnTop({ pipelineId: funnel.pipelineId, stageId: newStage, leadId: ana, addedById: maria, expectedStageKind: OPEN_STAGE });
 
-    await cards.addCardOnTop({ pipelineId: funnelOfJoao.pipelineId, stageId: funnelOfJoao.stageIdByName['Novo lead']!, leadId: ana, addedById: maria });
+    await cards.addCardOnTop({ pipelineId: funnelOfJoao.pipelineId, stageId: funnelOfJoao.stageIdByName['Novo lead']!, leadId: ana, addedById: maria, expectedStageKind: OPEN_STAGE });
 
     expect(await database.findLeadNamesInStageOrder(funnelOfJoao.stageIdByName['Novo lead']!)).toEqual(['Ana']);
   });
@@ -81,7 +82,7 @@ describe('Arrastar cartões', () => {
     await addLeadWithCard('Carla', '+5511900000003', proposalStage, 2048);
     const cardOfBruno = await addLeadWithCard('Bruno', '+5511900000002', newStage, 1024);
 
-    await cards.moveCard(cardOfBruno, { stageId: proposalStage, previousCardId: cardOfAna, closing: keepClosing });
+    await cards.moveCard(cardOfBruno, { stageId: proposalStage, previousCardId: cardOfAna, closing: keepClosing, expectedStageKind: OPEN_STAGE });
 
     expect(await database.findLeadNamesInStageOrder(proposalStage)).toEqual(['Ana', 'Bruno', 'Carla']);
     expect(await database.findLeadNamesInStageOrder(newStage)).toEqual([]);
@@ -91,7 +92,7 @@ describe('Arrastar cartões', () => {
     const cardOfAna = await addLeadWithCard('Ana', '+5511900000001', newStage, 1024);
     await database.client.stage.delete({ where: { id: proposalStage } });
 
-    const move = cards.moveCard(cardOfAna, { stageId: proposalStage, previousCardId: null, closing: keepClosing });
+    const move = cards.moveCard(cardOfAna, { stageId: proposalStage, previousCardId: null, closing: keepClosing, expectedStageKind: OPEN_STAGE });
 
     await expect(move).rejects.toBeInstanceOf(NotFoundError);
     await expect(move).rejects.toThrow(PIPELINE_ERRORS.STAGE_NOT_FOUND);
@@ -102,7 +103,7 @@ describe('Arrastar cartões', () => {
     await addLeadWithCard('Ana', '+5511900000001', newStage, 1024);
     const cardOfBruno = await addLeadWithCard('Bruno', '+5511900000002', newStage, 2048);
 
-    await cards.moveCard(cardOfBruno, { stageId: newStage, previousCardId: null, closing: keepClosing });
+    await cards.moveCard(cardOfBruno, { stageId: newStage, previousCardId: null, closing: keepClosing, expectedStageKind: OPEN_STAGE });
 
     expect(await database.findLeadNamesInStageOrder(newStage)).toEqual(['Bruno', 'Ana']);
   });
@@ -112,7 +113,7 @@ describe('Arrastar cartões', () => {
     await addLeadWithCard('Carla', '+5511900000003', newStage, 1000.0000001);
     const cardOfBruno = await addLeadWithCard('Bruno', '+5511900000002', proposalStage, 1024);
 
-    await cards.moveCard(cardOfBruno, { stageId: newStage, previousCardId: cardOfAna, closing: keepClosing });
+    await cards.moveCard(cardOfBruno, { stageId: newStage, previousCardId: cardOfAna, closing: keepClosing, expectedStageKind: OPEN_STAGE });
 
     expect(await database.findLeadNamesInStageOrder(newStage)).toEqual(['Ana', 'Bruno', 'Carla']);
   });
@@ -125,11 +126,36 @@ describe('Arrastar cartões', () => {
       stageId: proposalStage,
       previousCardId: null,
       closing: { wonValue: '1500.00', closingNote: 'Fechou no plano anual', closedAt },
+      expectedStageKind: OPEN_STAGE,
     });
-    await cards.moveCard(cardOfAna, { stageId: proposalStage, previousCardId: null, closing: keepClosing });
+    await cards.moveCard(cardOfAna, { stageId: proposalStage, previousCardId: null, closing: keepClosing, expectedStageKind: OPEN_STAGE });
 
     expect(await database.findCard(cardOfAna)).toMatchObject({ closingNote: 'Fechou no plano anual', closedAt });
     expect((await database.findCard(cardOfAna)).wonValue?.toFixed(2)).toBe('1500.00');
+  });
+});
+
+describe('A etapa mudou de tipo entre a conferência e a gravação', () => {
+  beforeEach(async () => {
+    await database.client.stage.update({ where: { id: proposalStage }, data: { isWon: true } });
+  });
+
+  it('adicionar não grava o cartão e avisa que a etapa mudou', async () => {
+    const ana = await database.addLead({ name: 'Ana', phone: '+5511900000001' });
+
+    const addition = await cards.addCardOnTop({ pipelineId: funnel.pipelineId, stageId: proposalStage, leadId: ana, addedById: maria, expectedStageKind: OPEN_STAGE });
+
+    expect(addition).toBe('stageKindChanged');
+    expect(await database.findLeadNamesInStageOrder(proposalStage)).toEqual([]);
+  });
+
+  it('arrastar não move o cartão e avisa que a etapa mudou', async () => {
+    const cardOfAna = await addLeadWithCard('Ana', '+5511900000001', newStage, 1024);
+
+    const move = await cards.moveCard(cardOfAna, { stageId: proposalStage, previousCardId: null, closing: keepClosing, expectedStageKind: OPEN_STAGE });
+
+    expect(move).toBe('stageKindChanged');
+    expect(await database.findLeadNamesInStageOrder(newStage)).toEqual(['Ana']);
   });
 });
 

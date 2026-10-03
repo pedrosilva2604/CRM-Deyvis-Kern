@@ -62,6 +62,8 @@ export interface PipelineAccess {
   level: PipelineAccessLevel;
 }
 
+export type StageKind = Pick<StageRecord, 'isWon' | 'isLost'>;
+
 export interface StageRecord {
   id: string;
   pipelineId: string;
