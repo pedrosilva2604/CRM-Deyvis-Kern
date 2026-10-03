@@ -139,7 +139,10 @@ export function UserFormDialog({ user, isSelf = false, onClose, onSaved }: UserF
           required
           value={values.email}
           error={fieldErrors.email}
-          onChange={(event) => updateValue('email', event.target.value)}
+          onChange={(event) => {
+            updateValue('email', event.target.value);
+            setDeletedUserIdHoldingEmail(null);
+          }}
         />
         {!isEditing && (
           <TextField
