@@ -85,10 +85,7 @@ export class LeadService implements ILeadService {
       assignedToId: newLead.assignedToId,
     });
 
-    await this.recordLeadAuditLog(loggedUserContext, 'lead.create', createdLead.id, {
-      name: createdLead.name,
-      phone: createdLead.phone,
-    });
+    await this.recordLeadAuditLog(loggedUserContext, 'lead.create', createdLead.id, undefined);
     return createdLead;
   }
 
@@ -126,17 +123,14 @@ export class LeadService implements ILeadService {
 
   async deleteLead({ targetLeadId }: DeleteLeadRequest, loggedUserContext: LoggedUserContext): Promise<void> {
     this.assertLoggedUserIsAdmin(loggedUserContext);
-    const leadToDelete = await this.findExistingLeadOrFail(targetLeadId);
+    await this.findExistingLeadOrFail(targetLeadId);
 
     await this.leadRepository.eraseLead({
       leadId: targetLeadId,
       deletedAt: this.clock.now(),
       deletedById: loggedUserContext.loggedUser.id,
     });
-    await this.recordLeadAuditLog(loggedUserContext, 'lead.delete', targetLeadId, {
-      name: leadToDelete.name,
-      phone: leadToDelete.phone,
-    });
+    await this.recordLeadAuditLog(loggedUserContext, 'lead.delete', targetLeadId, undefined);
   }
 
   private async assertContactIsAvailable(contact: LeadContact, leadBeingEdited: string | null): Promise<void> {

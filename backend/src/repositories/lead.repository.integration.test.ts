@@ -137,14 +137,19 @@ describe('Excluir um lead (LGPD)', () => {
     expect(await leads.findLeadById(joao)).toBeNull();
   });
 
-  it('guarda as mensagens e as vendas do lead excluído', async () => {
+  it('guarda as mensagens, com o número e o nome do contato, e as vendas do lead excluído', async () => {
     const joao = await database.addLead({ name: 'João', phone: '+5511900000001' });
     const message = await database.addMessage(joao, 'Quero fechar o plano anual');
     const sale = await database.addSale(joao, '1500.00');
 
     await leads.eraseLead({ leadId: joao, deletedAt: new Date(), deletedById: database.funnel.ownerId });
 
-    expect(await database.client.message.findUniqueOrThrow({ where: { id: message } })).toMatchObject({ leadId: joao, content: 'Quero fechar o plano anual' });
+    expect(await database.client.message.findUniqueOrThrow({ where: { id: message } })).toMatchObject({
+      leadId: joao,
+      contactPhone: '+5511900000001',
+      contactName: 'João',
+      content: 'Quero fechar o plano anual',
+    });
     expect(await database.client.sale.findUniqueOrThrow({ where: { id: sale } })).toMatchObject({ leadId: joao });
   });
 

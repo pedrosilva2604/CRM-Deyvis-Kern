@@ -119,7 +119,11 @@ export class TestDatabase {
   }
 
   async addMessage(leadId: string, content: string): Promise<string> {
-    const message = await this.client.message.create({ data: { leadId, direction: 'INBOUND', content }, select: { id: true } });
+    const { phone, name } = await this.client.lead.findUniqueOrThrow({ where: { id: leadId }, select: { phone: true, name: true } });
+    const message = await this.client.message.create({
+      data: { leadId, contactPhone: phone!, contactName: name, direction: 'INBOUND', content },
+      select: { id: true },
+    });
     return message.id;
   }
 

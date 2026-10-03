@@ -329,24 +329,28 @@ enum MessageStatus {
 }
 
 model Message {
-  id         String            @id @default(uuid()) @db.Uuid
-  leadId     String            @db.Uuid
-  lead       Lead              @relation(fields: [leadId], references: [id], onDelete: Restrict)
-  instanceId String?           @db.Uuid
-  instance   WhatsappInstance? @relation(fields: [instanceId], references: [id], onDelete: SetNull)
-  direction  MessageDirection
-  type       MessageType       @default(TEXT)
-  content    String?
-  mediaUrl   String?
-  externalId String?           @unique
-  status     MessageStatus     @default(PENDING)
-  sentById   String?           @db.Uuid
-  sentBy     User?             @relation(fields: [sentById], references: [id], onDelete: SetNull)
-  campaignId String?           @db.Uuid
-  campaign   Campaign?         @relation(fields: [campaignId], references: [id], onDelete: SetNull)
-  createdAt  DateTime          @default(now())
+  id                 String            @id @default(uuid()) @db.Uuid
+  leadId             String            @db.Uuid
+  lead               Lead              @relation(fields: [leadId], references: [id], onDelete: Restrict)
+  contactPhone       String
+  contactName        String?
+  deletedByContactAt DateTime?
+  instanceId         String?           @db.Uuid
+  instance           WhatsappInstance? @relation(fields: [instanceId], references: [id], onDelete: SetNull)
+  direction          MessageDirection
+  type               MessageType       @default(TEXT)
+  content            String?
+  mediaUrl           String?
+  externalId         String?           @unique
+  status             MessageStatus     @default(PENDING)
+  sentById           String?           @db.Uuid
+  sentBy             User?             @relation(fields: [sentById], references: [id], onDelete: SetNull)
+  campaignId         String?           @db.Uuid
+  campaign           Campaign?         @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  createdAt          DateTime          @default(now())
 
   @@index([leadId, createdAt])
+  @@index([contactPhone, createdAt])
 }
 
 model MessageTemplate {
