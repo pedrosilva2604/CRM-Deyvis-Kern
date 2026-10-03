@@ -13,7 +13,6 @@ export interface LeadToAdd {
   name: string;
   phone: string;
   email?: string;
-  deleted?: boolean;
 }
 
 export interface LeadImportToAdd {
@@ -58,6 +57,8 @@ export class TestDatabase {
 
   async prepareEmptyDatabase(): Promise<void> {
     await this.client.$transaction([
+      this.client.message.deleteMany(),
+      this.client.sale.deleteMany(),
       this.client.lead.deleteMany(),
       this.client.leadImport.deleteMany(),
       this.client.notification.deleteMany(),
@@ -109,18 +110,26 @@ export class TestDatabase {
     return await this.client.user.count({ where: { role: 'ADMIN', active: true } });
   }
 
-  async addLead({ name, phone, email, deleted = false }: LeadToAdd): Promise<string> {
+  async addLead({ name, phone, email }: LeadToAdd): Promise<string> {
     const lead = await this.client.lead.create({
-      data: {
-        name,
-        phone,
-        email: email ?? null,
-        enteredOn: ENTERED_ON,
-        deletedAt: deleted ? new Date() : null,
-      },
+      data: { name, phone, email: email ?? null, enteredOn: ENTERED_ON },
       select: { id: true },
     });
     return lead.id;
+  }
+
+  async addMessage(leadId: string, content: string): Promise<string> {
+    const message = await this.client.message.create({ data: { leadId, direction: 'INBOUND', content }, select: { id: true } });
+    return message.id;
+  }
+
+  async addSale(leadId: string, amount: string): Promise<string> {
+    const sale = await this.client.sale.create({ data: { leadId, amount }, select: { id: true } });
+    return sale.id;
+  }
+
+  async findLead(leadId: string) {
+    return await this.client.lead.findUniqueOrThrow({ where: { id: leadId } });
   }
 
   async addLeadImport({ requestedById, status, phonesToImport = [], processedRows = 0, intoTestFunnel = false }: LeadImportToAdd): Promise<string> {
@@ -220,8 +229,8 @@ export class TestDatabase {
   }
 
   async findPhonesOfAllLeads(): Promise<string[]> {
-    const leads = await this.client.lead.findMany({ select: { phone: true }, orderBy: { phone: 'asc' } });
-    return leads.map(({ phone }) => phone);
+    const leads = await this.client.lead.findMany({ where: { phone: { not: null } }, select: { phone: true }, orderBy: { phone: 'asc' } });
+    return leads.flatMap(({ phone }) => (phone === null ? [] : [phone]));
   }
 
   async disconnect(): Promise<void> {

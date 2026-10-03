@@ -43,8 +43,6 @@ describe('Processamento da importação', () => {
         processedRows: 3,
         importedLeads: 3,
         skippedExistingLeads: 0,
-        restoredLeads: 0,
-        skippedDeletedLeads: 0,
         addedToPipelineLeads: 0,
         alreadyInPipelineLeads: 0,
       },
@@ -76,36 +74,6 @@ describe('Processamento da importação', () => {
     await processing.processLeadImport('importacao', reportProgress);
 
     expect(leadImports.find('importacao')).toMatchObject({ importedLeads: 1, skippedExistingLeads: 1 });
-  });
-
-  it('quando um ADMIN importa, restaura o lead excluído daquele telefone', async () => {
-    const { processing, leadImports, reportProgress } = createProcessingScenario();
-    leadImports.phonesOfDeletedLeads.add('+5511900000002');
-    leadImports.add({
-      importId: 'importacao',
-      requesterIsAdmin: true,
-      rows: ['+5511900000001', '+5511900000002'].map(rowWithPhone),
-    });
-
-    await processing.processLeadImport('importacao', reportProgress);
-
-    expect(leadImports.find('importacao')).toMatchObject({ importedLeads: 1, restoredLeads: 1, skippedDeletedLeads: 0 });
-    expect(leadImports.phonesOfDeletedLeads.has('+5511900000002')).toBe(false);
-  });
-
-  it('quando um vendedor importa, não restaura e conta o lead excluído à parte', async () => {
-    const { processing, leadImports, reportProgress } = createProcessingScenario();
-    leadImports.phonesOfDeletedLeads.add('+5511900000002');
-    leadImports.add({
-      importId: 'importacao',
-      requesterIsAdmin: false,
-      rows: ['+5511900000001', '+5511900000002'].map(rowWithPhone),
-    });
-
-    await processing.processLeadImport('importacao', reportProgress);
-
-    expect(leadImports.find('importacao')).toMatchObject({ importedLeads: 1, restoredLeads: 0, skippedDeletedLeads: 1 });
-    expect(leadImports.phonesOfDeletedLeads.has('+5511900000002')).toBe(true);
   });
 
   it('informa o progresso a cada pedaço, para a tela e em tempo real para quem enviou', async () => {

@@ -121,15 +121,15 @@ export interface LeadContact {
   email?: string | null;
 }
 
-export interface LeadHoldingContact {
+export type ContactInUse = 'phone' | 'email';
+
+export interface LeadErasure {
   leadId: string;
-  heldContact: 'phone' | 'email';
-  isDeleted: boolean;
+  deletedAt: Date;
+  deletedById: string;
 }
 
-export interface RestoreLeadRequest {
-  targetLeadId: string;
-}
+export const DELETED_LEAD_NAME = 'Lead excluído';
 
 export const notDeletedLeads = { deletedAt: null } satisfies Prisma.LeadWhereInput;
 
@@ -139,11 +139,16 @@ export const leadOutputRelations = {
 
 export type LeadWithRelations = Prisma.LeadGetPayload<{ include: typeof leadOutputRelations }>;
 
+export function phoneOfActiveLead({ id, phone }: { id: string; phone: string | null }): string {
+  if (phone === null) throw new Error(`O lead ${id} foi excluído e não tem telefone`);
+  return phone;
+}
+
 export function toLeadOutput(lead: LeadWithRelations): LeadOutput {
   return {
     id: lead.id,
     name: lead.name,
-    phone: lead.phone,
+    phone: phoneOfActiveLead(lead),
     phoneCountry: lead.phoneCountry,
     email: lead.email,
     source: lead.source,

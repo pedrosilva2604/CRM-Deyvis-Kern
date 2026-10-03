@@ -296,8 +296,6 @@ export function importLeadSpreadsheet(csvText: string, maximumRows: number): Lea
     processedRows: content.rowsToImport.length,
     importedLeads: newLeads.length,
     skippedExistingLeads: content.rowsToImport.length - newLeads.length,
-    restoredLeads: 0,
-    skippedDeletedLeads: 0,
     addedToPipelineLeads: 0,
     alreadyInPipelineLeads: 0,
     importsIntoPipeline: false,

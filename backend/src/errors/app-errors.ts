@@ -30,15 +30,6 @@ export class ConflictError extends AppError {
   readonly statusCode = HttpStatus.CONFLICT;
 }
 
-export class DeletedLeadHoldsContactError extends ConflictError {
-  readonly extraResponseFields: Record<string, string>;
-
-  constructor(message: string, deletedLeadId: string) {
-    super(message);
-    this.extraResponseFields = { deletedLeadId };
-  }
-}
-
 export class DeletedUserHoldsEmailError extends ConflictError {
   readonly extraResponseFields: Record<string, string>;
 

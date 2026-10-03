@@ -1,4 +1,5 @@
 import type { LeadContactStatus, Prisma } from '@prisma/client';
+import { phoneOfActiveLead } from './lead.model';
 
 export interface PipelinePersonOutput {
   id: string;
@@ -235,6 +236,6 @@ export function toPipelineCardOutput(card: PipelineCardWithRelations): PipelineC
     wonValue: card.wonValue === null ? null : card.wonValue.toFixed(2),
     closingNote: card.closingNote,
     closedAt: card.closedAt,
-    lead: card.lead,
+    lead: { ...card.lead, phone: phoneOfActiveLead(card.lead) },
   };
 }

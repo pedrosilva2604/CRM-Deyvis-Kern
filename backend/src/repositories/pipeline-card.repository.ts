@@ -43,8 +43,6 @@ export interface IPipelineCardRepository {
 export const CARD_POSITION_GAP = 1024;
 const SMALLEST_GAP_BEFORE_RENUMBERING = 1e-6;
 
-const visibleCards = { lead: { deletedAt: null } };
-
 export async function lockStagesForCardPlacement(transaction: DatabaseTransaction, stageIds: string[]): Promise<LockedStage[]> {
   const stageIdsInLockOrder = [...stageIds].sort();
   return await transaction.$queryRaw<LockedStage[]>`
@@ -71,12 +69,12 @@ export class PipelineCardRepository implements IPipelineCardRepository {
   async findStageCardsPage(stageId: string, { afterPosition, limit }: StageCardsQuery): Promise<StageCardsPage> {
     const [cards, totalCards] = await Promise.all([
       this.prisma.pipelineCard.findMany({
-        where: { stageId, ...visibleCards, ...(afterPosition !== null && { position: { gt: afterPosition } }) },
+        where: { stageId, ...(afterPosition !== null && { position: { gt: afterPosition } }) },
         include: pipelineCardOutputRelations,
         orderBy: [{ position: 'asc' }, { id: 'asc' }],
         take: limit,
       }),
-      this.prisma.pipelineCard.count({ where: { stageId, ...visibleCards } }),
+      this.prisma.pipelineCard.count({ where: { stageId } }),
     ]);
     const lastCard = cards.at(-1);
     return {

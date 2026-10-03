@@ -1,4 +1,4 @@
-import { LeadImportStatus, Prisma } from '@prisma/client';
+import { LeadImportStatus } from '@prisma/client';
 import {
   toFinishedLeadImport,
   toLeadImportProgress,
@@ -34,27 +34,6 @@ export interface ILeadImportRepository {
 
 const RUNNING_LEAD_IMPORT_STATUSES = [LeadImportStatus.PENDING, LeadImportStatus.PROCESSING];
 
-interface LeadContactRecord {
-  phone: string;
-  email: string | null;
-}
-
-interface DeletedLeadContactRecord extends LeadContactRecord {
-  id: string;
-}
-
-interface DeletedLeadOfRow {
-  deletedLeadId: string;
-  currentPhone: string;
-  currentPhoneConfirmed: boolean;
-  newPhone: { phone: string; phoneCountry: string | null } | null;
-}
-
-interface RowsHeldByDeletedLeads {
-  rowCount: number;
-  deletedLeads: DeletedLeadOfRow[];
-}
-
 interface PipelinePlacement {
   addedToPipelineLeads: number;
   alreadyInPipelineLeads: number;
@@ -68,10 +47,6 @@ interface CardsToAddAboveTop {
 }
 
 const NOTHING_PLACED_IN_PIPELINE: PipelinePlacement = { addedToPipelineLeads: 0, alreadyInPipelineLeads: 0 };
-
-function holdsContactOf(lead: LeadContactRecord, row: LeadImportRowToProcess): boolean {
-  return lead.phone === row.phone || (row.email !== null && lead.email === row.email);
-}
 
 export class LeadImportChunkAlreadyProcessedError extends Error {
   constructor(importId: string) {
@@ -115,11 +90,8 @@ export class LeadImportRepository implements ILeadImportRepository {
     });
     if (markedAsProcessing.count === 0) return null;
     await this.prisma.leadImport.updateMany({ where: { id: importId, startedAt: null }, data: { startedAt } });
-    const leadImport = await this.prisma.leadImport.findUnique({
-      where: { id: importId },
-      include: { requestedBy: { select: { role: true } } },
-    });
-    return leadImport ? toLeadImportToProcess(leadImport, leadImport.requestedBy?.role ?? null) : null;
+    const leadImport = await this.prisma.leadImport.findUnique({ where: { id: importId } });
+    return leadImport ? toLeadImportToProcess(leadImport) : null;
   }
 
   async findNextRowsToProcess(
@@ -139,34 +111,18 @@ export class LeadImportRepository implements ILeadImportRepository {
   async importChunk({
     importId,
     processedRowsBefore,
-    restoresDeletedLeads,
     destination,
     addedById,
     leadsToCreate,
   }: LeadImportChunk): Promise<LeadImportChunkResult> {
     return await this.prisma.$transaction(async (transaction) => {
-      const insertedLeads = await transaction.lead.createManyAndReturn({
-        data: leadsToCreate,
-        skipDuplicates: true,
-        select: { phone: true },
-      });
-      const insertedPhones = new Set(insertedLeads.map((insertedLead) => insertedLead.phone));
-      const rowsNotInserted = leadsToCreate.filter((row) => !insertedPhones.has(row.phone));
-      const rowsHeldByDeletedLeads = await this.findDeletedLeadsHoldingRows(
-        transaction,
-        rowsNotInserted,
-        insertedPhones,
-        restoresDeletedLeads,
-      );
-      if (restoresDeletedLeads) await this.restoreDeletedLeads(transaction, importId, rowsHeldByDeletedLeads.deletedLeads);
+      const insertedLeads = await transaction.lead.createMany({ data: leadsToCreate, skipDuplicates: true });
       const pipelinePlacement = destination
         ? await this.placeLeadsOfRowsInPipeline(transaction, destination, leadsToCreate, addedById)
         : NOTHING_PLACED_IN_PIPELINE;
 
       const chunkResult: LeadImportChunkResult = {
-        insertedLeads: insertedLeads.length,
-        restoredLeads: restoresDeletedLeads ? rowsHeldByDeletedLeads.deletedLeads.length : 0,
-        skippedDeletedLeads: restoresDeletedLeads ? 0 : rowsHeldByDeletedLeads.rowCount,
+        insertedLeads: insertedLeads.count,
         ...pipelinePlacement,
       };
       const advanced = await transaction.leadImport.updateMany({
@@ -174,11 +130,7 @@ export class LeadImportRepository implements ILeadImportRepository {
         data: {
           processedRows: processedRowsBefore + leadsToCreate.length,
           importedLeads: { increment: chunkResult.insertedLeads },
-          skippedExistingLeads: {
-            increment: rowsNotInserted.length - chunkResult.restoredLeads - chunkResult.skippedDeletedLeads,
-          },
-          restoredLeads: { increment: chunkResult.restoredLeads },
-          skippedDeletedLeads: { increment: chunkResult.skippedDeletedLeads },
+          skippedExistingLeads: { increment: leadsToCreate.length - chunkResult.insertedLeads },
           addedToPipelineLeads: { increment: chunkResult.addedToPipelineLeads },
           alreadyInPipelineLeads: { increment: chunkResult.alreadyInPipelineLeads },
         },
@@ -270,62 +222,6 @@ export class LeadImportRepository implements ILeadImportRepository {
     return warning.count === 0 ? null : await this.findFinishedLeadImport(importId, sentAt);
   }
 
-  private async findDeletedLeadsHoldingRows(
-    transaction: DatabaseTransaction,
-    rowsNotInserted: LeadImportRowToProcess[],
-    insertedPhones: Set<string>,
-    locksDeletedLeads: boolean,
-  ): Promise<RowsHeldByDeletedLeads> {
-    if (rowsNotInserted.length === 0) return { rowCount: 0, deletedLeads: [] };
-    const phones = rowsNotInserted.map((row) => row.phone);
-    const emails = rowsNotInserted.flatMap((row) => (row.email ? [row.email] : []));
-    const activeLeads = await transaction.lead.findMany({
-      where: { deletedAt: null, OR: [{ phone: { in: phones } }, { email: { in: emails } }] },
-      select: { phone: true, email: true },
-    });
-    const deletedLeads = await transaction.$queryRaw<DeletedLeadContactRecord[]>`
-      SELECT "id", "phone", "email" FROM "Lead"
-      WHERE "deletedAt" IS NOT NULL AND ("phone" = ANY(${phones}::text[]) OR "email" = ANY(${emails}::text[]))
-      ORDER BY "phone" ${locksDeletedLeads ? Prisma.sql`FOR UPDATE` : Prisma.empty}`;
-    const phonesInUse = new Set([...insertedPhones, ...activeLeads.map((lead) => lead.phone), ...deletedLeads.map((lead) => lead.phone)]);
-
-    const deletedLeadById = new Map<string, DeletedLeadOfRow>();
-    let rowCount = 0;
-    for (const row of rowsNotInserted) {
-      if (activeLeads.some((activeLead) => holdsContactOf(activeLead, row))) continue;
-      const deletedLead =
-        deletedLeads.find((candidate) => candidate.phone === row.phone) ??
-        deletedLeads.find((candidate) => row.email !== null && candidate.email === row.email);
-      if (!deletedLead) continue;
-      rowCount += 1;
-      const alreadyFound = deletedLeadById.get(deletedLead.id);
-      const currentPhoneConfirmed = (alreadyFound?.currentPhoneConfirmed ?? false) || row.phone === deletedLead.phone;
-      const bringsNewFreePhone = row.phone !== deletedLead.phone && !phonesInUse.has(row.phone);
-      const newPhoneOfRow = bringsNewFreePhone ? { phone: row.phone, phoneCountry: row.phoneCountry } : null;
-      deletedLeadById.set(deletedLead.id, {
-        deletedLeadId: deletedLead.id,
-        currentPhone: deletedLead.phone,
-        currentPhoneConfirmed,
-        newPhone: currentPhoneConfirmed ? null : (newPhoneOfRow ?? alreadyFound?.newPhone ?? null),
-      });
-    }
-    return { rowCount, deletedLeads: [...deletedLeadById.values()] };
-  }
-
-  private async restoreDeletedLeads(
-    transaction: DatabaseTransaction,
-    importId: string,
-    deletedLeadsOfRows: DeletedLeadOfRow[],
-  ): Promise<void> {
-    for (const { deletedLeadId, currentPhone, newPhone } of deletedLeadsOfRows) {
-      const keepsCurrentPhone = newPhone === null || (await this.isPhoneInSpreadsheet(transaction, importId, currentPhone));
-      await transaction.lead.update({
-        where: { id: deletedLeadId },
-        data: { deletedAt: null, ...(keepsCurrentPhone ? {} : newPhone) },
-      });
-    }
-  }
-
   private async placeLeadsOfRowsInPipeline(
     transaction: DatabaseTransaction,
     destination: LeadImportDestination,
@@ -377,10 +273,6 @@ export class LeadImportRepository implements ILeadImportRepository {
       if (leadOfRow) leadIds.add(leadOfRow.id);
     }
     return [...leadIds].sort();
-  }
-
-  private async isPhoneInSpreadsheet(transaction: DatabaseTransaction, importId: string, phone: string): Promise<boolean> {
-    return (await transaction.leadImportRow.count({ where: { leadImportId: importId, phone } })) > 0;
   }
 
   private async findFinishedLeadImport(importId: string, finishedAt: Date): Promise<FinishedLeadImport | null> {

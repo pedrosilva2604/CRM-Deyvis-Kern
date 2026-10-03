@@ -56,7 +56,8 @@ describe('Busca de leads por nome e e-mail', () => {
   });
 
   it('não mostra leads excluídos', async () => {
-    await database.addLead({ name: 'Maria Souza', phone: '+5511900000001', deleted: true });
+    const maria = await database.addLead({ name: 'Maria Souza', phone: '+5511900000001' });
+    await leads.eraseLead({ leadId: maria, deletedAt: new Date(), deletedById: database.funnel.ownerId });
 
     expect(await namesFoundBy(searchByWords('maria'))).toEqual([]);
   });
@@ -85,67 +86,81 @@ describe('Busca de leads por telefone', () => {
 });
 
 describe('Quem já tem o telefone ou o e-mail', () => {
-  it('aponta o lead excluído que tem o telefone', async () => {
-    const deletedLead = await database.addLead({ name: 'Excluído', phone: '+5511900000001', deleted: true });
+  it('aponta o telefone em uso por um lead ativo', async () => {
+    await database.addLead({ name: 'Maria', phone: '+5511900000001' });
 
-    expect(await leads.findLeadHoldingContact({ phone: '+5511900000001' }, null)).toEqual({
-      leadId: deletedLead,
-      heldContact: 'phone',
-      isDeleted: true,
-    });
+    expect(await leads.findContactInUse({ phone: '+5511900000001' }, null)).toBe('phone');
   });
 
-  it('aponta o lead excluído que tem o e-mail', async () => {
-    const deletedLead = await database.addLead({ name: 'Excluído', phone: '+5511900000001', email: 'ana@empresa.com', deleted: true });
+  it('aponta o e-mail em uso quando o telefone está livre', async () => {
+    await database.addLead({ name: 'Ana', phone: '+5511900000001', email: 'ana@empresa.com' });
 
-    expect(await leads.findLeadHoldingContact({ phone: '+5511900000099', email: 'ana@empresa.com' }, null)).toEqual({
-      leadId: deletedLead,
-      heldContact: 'email',
-      isDeleted: true,
-    });
-  });
-
-  it('com telefone de lead ativo e e-mail de lead excluído, aponta o ativo: restaurar não destravaria o cadastro', async () => {
-    const maria = await database.addLead({ name: 'Maria (ativa)', phone: '+5511900000001' });
-    await database.addLead({ name: 'João (excluído)', phone: '+5511900000002', email: 'joao@empresa.com', deleted: true });
-
-    expect(await leads.findLeadHoldingContact({ phone: '+5511900000001', email: 'joao@empresa.com' }, null)).toEqual({
-      leadId: maria,
-      heldContact: 'phone',
-      isDeleted: false,
-    });
-  });
-
-  it('telefone e e-mail de dois leads excluídos diferentes: aponta o lead do telefone', async () => {
-    await database.addLead({ name: 'Excluído do e-mail', phone: '+5511900000002', email: 'ana@empresa.com', deleted: true });
-    const deletedLeadOfPhone = await database.addLead({ name: 'Excluído do telefone', phone: '+5511900000001', deleted: true });
-
-    expect(await leads.findLeadHoldingContact({ phone: '+5511900000001', email: 'ana@empresa.com' }, null)).toEqual({
-      leadId: deletedLeadOfPhone,
-      heldContact: 'phone',
-      isDeleted: true,
-    });
+    expect(await leads.findContactInUse({ phone: '+5511900000099', email: 'ana@empresa.com' }, null)).toBe('email');
   });
 
   it('na edição, ignora o próprio lead', async () => {
     const maria = await database.addLead({ name: 'Maria', phone: '+5511900000001', email: 'maria@empresa.com' });
 
-    expect(await leads.findLeadHoldingContact({ email: 'maria@empresa.com' }, maria)).toBeNull();
-  });
-  it('restaura o lead excluído com o histórico dele', async () => {
-    const deletedLead = await database.addLead({ name: 'Excluído', phone: '+5511900000001', deleted: true });
-
-    expect(await leads.restoreDeletedLead(deletedLead)).toBe(true);
-    expect(await leads.findLeadById(deletedLead)).toMatchObject({ name: 'Excluído', phone: '+5511900000001' });
+    expect(await leads.findContactInUse({ email: 'maria@empresa.com' }, maria)).toBeNull();
   });
 
-  it('não "restaura" um lead que não está excluído', async () => {
-    const activeLead = await database.addLead({ name: 'Ativo', phone: '+5511900000001' });
+  it('o telefone e o e-mail de um lead excluído ficam livres para um lead novo', async () => {
+    const joao = await database.addLead({ name: 'João', phone: '+5511900000001', email: 'joao@empresa.com' });
+    await leads.eraseLead({ leadId: joao, deletedAt: new Date(), deletedById: database.funnel.ownerId });
 
-    expect(await leads.restoreDeletedLead(activeLead)).toBe(false);
+    expect(await leads.findContactInUse({ phone: '+5511900000001', email: 'joao@empresa.com' }, null)).toBeNull();
   });
 });
 
+describe('Excluir um lead (LGPD)', () => {
+  it('apaga os dados pessoais e os cartões, e guarda quem excluiu e quando', async () => {
+    const joao = await database.addLead({ name: 'João Pereira', phone: '+5511900000001', email: 'joao@empresa.com' });
+    await database.client.lead.update({ where: { id: joao }, data: { source: 'Instagram', tags: ['vip'], value: '900.00' } });
+    await database.addCard(database.funnel.pipelineId, database.funnel.stageId, joao, 1024);
+    const deletedAt = new Date('2026-10-02T18:00:00.000Z');
+
+    await leads.eraseLead({ leadId: joao, deletedAt, deletedById: database.funnel.ownerId });
+
+    expect(await database.findLead(joao)).toMatchObject({
+      name: 'Lead excluído',
+      phone: null,
+      phoneCountry: null,
+      email: null,
+      source: null,
+      tags: [],
+      value: null,
+      assignedToId: null,
+      deletedAt,
+      deletedById: database.funnel.ownerId,
+    });
+    expect(await database.client.pipelineCard.count({ where: { leadId: joao } })).toBe(0);
+    expect(await leads.findLeadById(joao)).toBeNull();
+  });
+
+  it('guarda as mensagens e as vendas do lead excluído', async () => {
+    const joao = await database.addLead({ name: 'João', phone: '+5511900000001' });
+    const message = await database.addMessage(joao, 'Quero fechar o plano anual');
+    const sale = await database.addSale(joao, '1500.00');
+
+    await leads.eraseLead({ leadId: joao, deletedAt: new Date(), deletedById: database.funnel.ownerId });
+
+    expect(await database.client.message.findUniqueOrThrow({ where: { id: message } })).toMatchObject({ leadId: joao, content: 'Quero fechar o plano anual' });
+    expect(await database.client.sale.findUniqueOrThrow({ where: { id: sale } })).toMatchObject({ leadId: joao });
+  });
+
+  it('o banco não deixa apagar de vez um lead que tem mensagens', async () => {
+    const joao = await database.addLead({ name: 'João', phone: '+5511900000001' });
+    await database.addMessage(joao, 'Oi');
+
+    await expect(database.client.lead.delete({ where: { id: joao } })).rejects.toThrow();
+  });
+
+  it('o banco não deixa um lead ativo ficar sem telefone', async () => {
+    const maria = await database.addLead({ name: 'Maria', phone: '+5511900000001' });
+
+    await expect(database.client.lead.update({ where: { id: maria }, data: { phone: null } })).rejects.toThrow();
+  });
+});
 describe('Paginação da lista de leads', () => {
   it('informa o total encontrado mesmo mostrando só uma página', async () => {
     await database.addLead({ name: 'Lead 1', phone: '+5511900000001' });

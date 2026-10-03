@@ -4,9 +4,11 @@ import { LEAD_IMPORT_ERRORS } from '@/errors/errors.constants';
 import type { LeadImportChunk } from '@/models/lead-import.model';
 import { leadsToCreateFrom, TestDatabase } from '@/testing/integration/test-database';
 import { LeadImportChunkAlreadyProcessedError, LeadImportRepository } from './lead-import.repository';
+import { LeadRepository } from './lead.repository';
 
 const database = new TestDatabase();
 const leadImports = new LeadImportRepository(database.client);
+const leads = new LeadRepository(database.client);
 const finishedAt = new Date('2026-09-30T12:00:00.000Z');
 
 function newImportRequestedBy(requestedById: string) {
@@ -23,26 +25,10 @@ function newImportRequestedBy(requestedById: string) {
 
 const DISPUTES_TO_CATCH_A_DEADLOCK = 15;
 
-function chunkWithRows(
-  importId: string,
-  rows: { phone: string; email: string | null }[],
-  { importedBy, processedRowsBefore = 0 }: { importedBy: 'admin' | 'seller'; processedRowsBefore?: number },
-): LeadImportChunk {
-  return {
-    ...chunkOf(importId, rows.map((row) => row.phone), { importedBy }),
-    processedRowsBefore,
-    leadsToCreate: leadsToCreateFrom(rows.map((row) => row.phone)).map((lead, rowIndex) => ({
-      ...lead,
-      email: rows[rowIndex]!.email,
-    })),
-  };
-}
-
-function chunkOf(importId: string, phones: string[], { importedBy }: { importedBy: 'admin' | 'seller' }): LeadImportChunk {
+function chunkOf(importId: string, phones: string[]): LeadImportChunk {
   return {
     importId,
     processedRowsBefore: 0,
-    restoresDeletedLeads: importedBy === 'admin',
     destination: null,
     addedById: database.funnel.ownerId,
     leadsToCreate: leadsToCreateFrom(phones),
@@ -62,7 +48,7 @@ describe('Gravação de um pedaço da importação', () => {
     const maria = await database.addUser('Maria');
     const importId = await database.addLeadImport({ requestedById: maria, status: 'PROCESSING' });
 
-    await leadImports.importChunk(chunkOf(importId, ['+5511900000001', '+5511900000002'], { importedBy: 'seller' }));
+    await leadImports.importChunk(chunkOf(importId, ['+5511900000001', '+5511900000002']));
 
     expect(await database.findPhonesOfAllLeads()).toEqual(['+5511900000001', '+5511900000002']);
     expect(await database.findLeadImport(importId)).toMatchObject({ processedRows: 2, importedLeads: 2 });
@@ -73,9 +59,9 @@ describe('Gravação de um pedaço da importação', () => {
     await database.addLead({ name: 'Cliente antigo', phone: '+5511900000001' });
     const importId = await database.addLeadImport({ requestedById: maria, status: 'PROCESSING' });
 
-    const chunkResult = await leadImports.importChunk(chunkOf(importId, ['+5511900000001', '+5511900000002'], { importedBy: 'seller' }));
+    const chunkResult = await leadImports.importChunk(chunkOf(importId, ['+5511900000001', '+5511900000002']));
 
-    expect(chunkResult).toMatchObject({ insertedLeads: 1, restoredLeads: 0, skippedDeletedLeads: 0 });
+    expect(chunkResult).toMatchObject({ insertedLeads: 1 });
     expect(await database.findPhonesOfAllLeads()).toEqual(['+5511900000001', '+5511900000002']);
     expect(await database.findLeadImport(importId)).toMatchObject({ importedLeads: 1, skippedExistingLeads: 1 });
   });
@@ -83,9 +69,9 @@ describe('Gravação de um pedaço da importação', () => {
   it('recusa o pedaço que outra execução já gravou e desfaz os leads que tentou inserir', async () => {
     const maria = await database.addUser('Maria');
     const importId = await database.addLeadImport({ requestedById: maria, status: 'PROCESSING' });
-    await leadImports.importChunk(chunkOf(importId, ['+5511900000001'], { importedBy: 'seller' }));
+    await leadImports.importChunk(chunkOf(importId, ['+5511900000001']));
 
-    const secondExecution = leadImports.importChunk(chunkOf(importId, ['+5511900000099'], { importedBy: 'seller' }));
+    const secondExecution = leadImports.importChunk(chunkOf(importId, ['+5511900000099']));
 
     await expect(secondExecution).rejects.toBeInstanceOf(LeadImportChunkAlreadyProcessedError);
     expect(await database.findPhonesOfAllLeads()).toEqual(['+5511900000001']);
@@ -93,153 +79,21 @@ describe('Gravação de um pedaço da importação', () => {
   });
 });
 
-describe('Telefones de leads excluídos na importação', () => {
-  it('importação de ADMIN restaura o lead excluído, sem criar outro', async () => {
-    const ana = await database.addUser('Ana', { role: 'ADMIN' });
-    await database.addLead({ name: 'Cliente excluído', phone: '+5511900000001', deleted: true });
-    const importId = await database.addLeadImport({ requestedById: ana, status: 'PROCESSING' });
-
-    const chunkResult = await leadImports.importChunk(chunkOf(importId, ['+5511900000001', '+5511900000002'], { importedBy: 'admin' }));
-
-    expect(chunkResult).toMatchObject({ insertedLeads: 1, restoredLeads: 1, skippedDeletedLeads: 0 });
-    expect(await database.findLeadByPhone('+5511900000001')).toMatchObject({ name: 'Cliente excluído', deletedAt: null });
-    expect(await database.findLeadImport(importId)).toMatchObject({ importedLeads: 1, restoredLeads: 1, skippedExistingLeads: 0 });
-  });
-
-  it('importação de vendedor não restaura e conta à parte, sem misturar com "já existia"', async () => {
+describe('Lead excluído na importação', () => {
+  it('o telefone e o e-mail de um lead excluído voltam como um lead novo, sem nada do antigo', async () => {
     const maria = await database.addUser('Maria');
-    await database.addLead({ name: 'Cliente excluído', phone: '+5511900000001', deleted: true });
-    await database.addLead({ name: 'Cliente ativo', phone: '+5511900000002' });
+    const joao = await database.addLead({ name: 'João', phone: '+5511900000001', email: 'joao@empresa.com' });
+    await leads.eraseLead({ leadId: joao, deletedAt: new Date(), deletedById: maria });
     const importId = await database.addLeadImport({ requestedById: maria, status: 'PROCESSING' });
 
-    const chunkResult = await leadImports.importChunk(
-      chunkOf(importId, ['+5511900000001', '+5511900000002', '+5511900000003'], { importedBy: 'seller' }),
-    );
+    const chunkResult = await leadImports.importChunk(chunkOf(importId, ['+5511900000001']));
 
-    expect(chunkResult).toMatchObject({ insertedLeads: 1, restoredLeads: 0, skippedDeletedLeads: 1 });
-    expect(await database.findLeadByPhone('+5511900000001')).toMatchObject({ deletedAt: expect.any(Date) });
-    expect(await database.findLeadImport(importId)).toMatchObject({
-      importedLeads: 1,
-      skippedDeletedLeads: 1,
-      skippedExistingLeads: 1,
-      restoredLeads: 0,
-    });
+    const leadOfRow = await database.findLeadByPhone('+5511900000001');
+    expect(chunkResult).toMatchObject({ insertedLeads: 1 });
+    expect(leadOfRow.id).not.toBe(joao);
+    expect(await database.findLead(joao)).toMatchObject({ name: 'Lead excluído', phone: null });
   });
 });
-
-describe('Lead excluído reconhecido pelo e-mail na importação', () => {
-  it('importação de ADMIN restaura o João pelo e-mail, e o telefone novo da planilha passa a ser o dele', async () => {
-    const ana = await database.addUser('Ana', { role: 'ADMIN' });
-    await database.addLead({ name: 'João excluído', phone: '+5511900000001', email: 'joao@empresa.com', deleted: true });
-    const importId = await database.addLeadImport({ requestedById: ana, status: 'PROCESSING' });
-
-    const chunkResult = await leadImports.importChunk(
-      chunkWithRows(importId, [{ phone: '+5511900000099', email: 'joao@empresa.com' }], { importedBy: 'admin' }),
-    );
-
-    expect(chunkResult).toMatchObject({ insertedLeads: 0, restoredLeads: 1, skippedDeletedLeads: 0 });
-    expect(await database.findLeadByPhone('+5511900000099')).toMatchObject({ name: 'João excluído', deletedAt: null });
-  });
-
-  it.each([
-    ['primeiro a linha com o telefone atual', [{ phone: '+5511900000001', email: null }, { phone: '+5511900000099', email: 'joao@empresa.com' }]],
-    ['primeiro a linha com o telefone novo', [{ phone: '+5511900000099', email: 'joao@empresa.com' }, { phone: '+5511900000001', email: null }]],
-  ])('se alguma linha confirma o telefone atual do João, ele continua com esse telefone (%s)', async (_order, rows) => {
-    const ana = await database.addUser('Ana', { role: 'ADMIN' });
-    await database.addLead({ name: 'João excluído', phone: '+5511900000001', email: 'joao@empresa.com', deleted: true });
-    const importId = await database.addLeadImport({ requestedById: ana, status: 'PROCESSING' });
-
-    await leadImports.importChunk(chunkWithRows(importId, rows, { importedBy: 'admin' }));
-
-    expect(await database.findLeadByPhone('+5511900000001')).toMatchObject({ name: 'João excluído', deletedAt: null });
-  });
-
-  it('a linha com o telefone atual do João em OUTRO pedaço também mantém o telefone, sem criar um João duplicado', async () => {
-    const ana = await database.addUser('Ana', { role: 'ADMIN' });
-    await database.addLead({ name: 'João excluído', phone: '+5511900000001', email: 'joao@empresa.com', deleted: true });
-    const importId = await database.addLeadImport({
-      requestedById: ana,
-      status: 'PROCESSING',
-      phonesToImport: ['+5511900000099', '+5511900000001'],
-    });
-
-    await leadImports.importChunk(
-      chunkWithRows(importId, [{ phone: '+5511900000099', email: 'joao@empresa.com' }], { importedBy: 'admin' }),
-    );
-    await leadImports.importChunk(
-      chunkWithRows(importId, [{ phone: '+5511900000001', email: null }], { importedBy: 'admin', processedRowsBefore: 1 }),
-    );
-
-    expect(await database.findLeadByPhone('+5511900000001')).toMatchObject({ name: 'João excluído', deletedAt: null });
-    expect(await database.findPhonesOfAllLeads()).toEqual(['+5511900000001']);
-    expect(await database.findLeadImport(importId)).toMatchObject({ restoredLeads: 1, skippedExistingLeads: 1, importedLeads: 0 });
-  });
-
-  it('na importação de vendedor, duas linhas do mesmo João excluído contam as duas como "pertencem a lead excluído"', async () => {
-    const maria = await database.addUser('Maria');
-    await database.addLead({ name: 'João excluído', phone: '+5511900000001', email: 'joao@empresa.com', deleted: true });
-    const importId = await database.addLeadImport({ requestedById: maria, status: 'PROCESSING' });
-
-    await leadImports.importChunk(
-      chunkWithRows(
-        importId,
-        [
-          { phone: '+5511900000001', email: null },
-          { phone: '+5511900000099', email: 'joao@empresa.com' },
-        ],
-        { importedBy: 'seller' },
-      ),
-    );
-
-    expect(await database.findLeadImport(importId)).toMatchObject({ skippedDeletedLeads: 2, skippedExistingLeads: 0, restoredLeads: 0 });
-  });
-
-  it('duas linhas do mesmo João contam um restaurado e um "já existia"', async () => {
-    const ana = await database.addUser('Ana', { role: 'ADMIN' });
-    await database.addLead({ name: 'João excluído', phone: '+5511900000001', email: 'joao@empresa.com', deleted: true });
-    const importId = await database.addLeadImport({ requestedById: ana, status: 'PROCESSING' });
-
-    const chunkResult = await leadImports.importChunk(
-      chunkWithRows(
-        importId,
-        [
-          { phone: '+5511900000001', email: 'outro-email@empresa.com' },
-          { phone: '+5511900000099', email: 'joao@empresa.com' },
-        ],
-        { importedBy: 'admin' },
-      ),
-    );
-
-    expect(chunkResult).toMatchObject({ insertedLeads: 0, restoredLeads: 1, skippedDeletedLeads: 0 });
-    expect(await database.findLeadImport(importId)).toMatchObject({ restoredLeads: 1, skippedExistingLeads: 1 });
-  });
-
-  it('importação de vendedor conta a linha como "pertence a lead excluído", e não como "já existia"', async () => {
-    const maria = await database.addUser('Maria');
-    await database.addLead({ name: 'João excluído', phone: '+5511900000001', email: 'joao@empresa.com', deleted: true });
-    const importId = await database.addLeadImport({ requestedById: maria, status: 'PROCESSING' });
-
-    await leadImports.importChunk(chunkWithRows(importId, [{ phone: '+5511900000099', email: 'joao@empresa.com' }], { importedBy: 'seller' }));
-
-    expect(await database.findLeadImport(importId)).toMatchObject({ skippedDeletedLeads: 1, skippedExistingLeads: 0 });
-  });
-
-  it('telefone de lead ativo e e-mail de lead excluído: conta como "já existia" e não restaura ninguém', async () => {
-    const ana = await database.addUser('Ana', { role: 'ADMIN' });
-    await database.addLead({ name: 'Maria ativa', phone: '+5511900000001' });
-    await database.addLead({ name: 'João excluído', phone: '+5511900000002', email: 'joao@empresa.com', deleted: true });
-    const importId = await database.addLeadImport({ requestedById: ana, status: 'PROCESSING' });
-
-    const chunkResult = await leadImports.importChunk(
-      chunkWithRows(importId, [{ phone: '+5511900000001', email: 'joao@empresa.com' }], { importedBy: 'admin' }),
-    );
-
-    expect(chunkResult).toMatchObject({ insertedLeads: 0, restoredLeads: 0, skippedDeletedLeads: 0 });
-    expect(await database.findLeadImport(importId)).toMatchObject({ skippedExistingLeads: 1 });
-    expect(await database.findLeadByPhone('+5511900000002')).toMatchObject({ deletedAt: expect.any(Date) });
-  });
-});
-
 describe('Importação direto numa etapa do funil', () => {
   it('cria os novos na base, põe no funil quem não estava e deixa onde está quem já estava', async () => {
     const maria = await database.addUser('Maria');
@@ -252,7 +106,7 @@ describe('Importação direto numa etapa do funil', () => {
     const importId = await database.addLeadImport({ requestedById: maria, status: 'PROCESSING' });
 
     const chunkResult = await leadImports.importChunk({
-      ...chunkOf(importId, ['+5511900000001', '+5511900000002', '+5511900000003'], { importedBy: 'seller' }),
+      ...chunkOf(importId, ['+5511900000001', '+5511900000002', '+5511900000003']),
       destination: { pipelineId: funnel.pipelineId, stageId: newStage },
       addedById: maria,
     });
@@ -263,22 +117,6 @@ describe('Importação direto numa etapa do funil', () => {
     expect(await database.findLeadImport(importId)).toMatchObject({ addedToPipelineLeads: 2, alreadyInPipelineLeads: 1 });
   });
 
-  it('na importação de vendedor, lead excluído não entra no funil', async () => {
-    const maria = await database.addUser('Maria');
-    const funnel = await database.addPipeline(maria, ['Novo lead']);
-    await database.addLead({ name: 'Excluído', phone: '+5511900000001', deleted: true });
-    const importId = await database.addLeadImport({ requestedById: maria, status: 'PROCESSING' });
-
-    const chunkResult = await leadImports.importChunk({
-      ...chunkOf(importId, ['+5511900000001'], { importedBy: 'seller' }),
-      destination: { pipelineId: funnel.pipelineId, stageId: funnel.stageIdByName['Novo lead']! },
-      addedById: maria,
-    });
-
-    expect(chunkResult).toMatchObject({ skippedDeletedLeads: 1, addedToPipelineLeads: 0 });
-    expect(await database.findLeadNamesInStageOrder(funnel.stageIdByName['Novo lead']!)).toEqual([]);
-  });
-
   it('se a etapa virou Ganho no meio da importação, os leads ficam só na base, sem falhar', async () => {
     const maria = await database.addUser('Maria');
     const funnel = await database.addPipeline(maria, ['Proposta']);
@@ -287,7 +125,7 @@ describe('Importação direto numa etapa do funil', () => {
     await database.client.stage.update({ where: { id: proposalStage }, data: { isWon: true } });
 
     const chunkResult = await leadImports.importChunk({
-      ...chunkOf(importId, ['+5511900000001'], { importedBy: 'seller' }),
+      ...chunkOf(importId, ['+5511900000001']),
       destination: { pipelineId: funnel.pipelineId, stageId: proposalStage },
       addedById: maria,
     });
@@ -304,7 +142,7 @@ describe('Importação direto numa etapa do funil', () => {
     await database.client.pipeline.delete({ where: { id: funnel.pipelineId } });
 
     const chunkResult = await leadImports.importChunk({
-      ...chunkOf(importId, ['+5511900000001', '+5511900000002'], { importedBy: 'seller' }),
+      ...chunkOf(importId, ['+5511900000001', '+5511900000002']),
       destination: destinationBeforeDeletion,
       addedById: maria,
     });
@@ -315,31 +153,29 @@ describe('Importação direto numa etapa do funil', () => {
 });
 
 describe('Duas importações gravando os mesmos telefones ao mesmo tempo', () => {
-  it('a de ADMIN restaurando e a de vendedor inserindo terminam as duas, sem deadlock (em 15 disputas)', async () => {
+  it('terminam as duas, sem deadlock e sem lead duplicado (em 15 disputas)', async () => {
     const phones = Array.from({ length: 40 }, (_, phoneIndex) => `+55119000${String(phoneIndex).padStart(5, '0')}`);
-    const deletedPhones = phones.filter((_, phoneIndex) => phoneIndex % 2 === 1);
     const failures: string[] = [];
 
     for (let dispute = 1; dispute <= DISPUTES_TO_CATCH_A_DEADLOCK; dispute += 1) {
       await database.prepareEmptyDatabase();
-      for (const phone of deletedPhones) await database.addLead({ name: `Excluído ${phone}`, phone, deleted: true });
       const ana = await database.addUser('Ana', { role: 'ADMIN' });
       const maria = await database.addUser('Maria');
-      const adminImport = await database.addLeadImport({ requestedById: ana, status: 'PROCESSING' });
-      const sellerImport = await database.addLeadImport({ requestedById: maria, status: 'PROCESSING' });
+      const importOfAna = await database.addLeadImport({ requestedById: ana, status: 'PROCESSING' });
+      const importOfMaria = await database.addLeadImport({ requestedById: maria, status: 'PROCESSING' });
 
       const outcomes = await Promise.allSettled([
-        leadImports.importChunk(chunkOf(adminImport, phones, { importedBy: 'admin' })),
-        leadImports.importChunk(chunkOf(sellerImport, phones, { importedBy: 'seller' })),
+        leadImports.importChunk(chunkOf(importOfAna, phones)),
+        leadImports.importChunk(chunkOf(importOfMaria, phones)),
       ]);
 
       outcomes.forEach((outcome) => outcome.status === 'rejected' && failures.push(String(outcome.reason).split('\n')[0]!));
+      expect(await database.findPhonesOfAllLeads()).toHaveLength(phones.length);
     }
 
     expect(failures).toEqual([]);
   });
 });
-
 describe('Uma importação em andamento por usuário', () => {
   it('aceita só uma de duas importações enviadas ao mesmo tempo pelo mesmo usuário', async () => {
     const maria = await database.addUser('Maria');

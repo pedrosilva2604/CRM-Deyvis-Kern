@@ -2,6 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { ConflictError, NotFoundError } from '@/errors/app-errors';
 import { PIPELINE_ERRORS } from '@/errors/errors.constants';
 import { TestDatabase, type TestPipeline } from '@/testing/integration/test-database';
+import { LeadRepository } from './lead.repository';
 import { PipelineCardRepository } from './pipeline-card.repository';
 
 const database = new TestDatabase();
@@ -160,10 +161,11 @@ describe('A etapa mudou de tipo entre a conferência e a gravação', () => {
 });
 
 describe('Página de cartões de uma etapa', () => {
-  it('esconde os leads excluídos e diz quantos existem', async () => {
+  it('o lead excluído sai do quadro junto com o cartão', async () => {
     await addLeadWithCard('Ana', '+5511900000001', newStage, 1024);
-    const excluded = await database.addLead({ name: 'Excluído', phone: '+5511900000002', deleted: true });
+    const excluded = await database.addLead({ name: 'Excluído', phone: '+5511900000002' });
     await database.addCard(funnel.pipelineId, newStage, excluded, 2048);
+    await new LeadRepository(database.client).eraseLead({ leadId: excluded, deletedAt: new Date(), deletedById: maria });
 
     const page = await cards.findStageCardsPage(newStage, { afterPosition: null, limit: 50 });
 

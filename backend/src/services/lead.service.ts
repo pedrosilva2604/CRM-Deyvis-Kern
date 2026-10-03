@@ -1,24 +1,23 @@
 import { Role } from '@prisma/client';
 import { readLeadPhone, readSpreadsheetDate } from '@crm/shared';
-import { BadRequestError, ConflictError, DeletedLeadHoldsContactError, ForbiddenError, NotFoundError } from '@/errors/app-errors';
+import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from '@/errors/app-errors';
 import { AUTH_ERRORS, LEAD_ERRORS } from '@/errors/errors.constants';
 import type { BusinessCalendar } from '@/infra/business-calendar';
 import type { Clock } from '@/infra/clock';
 import type { AuditLogInput } from '@/models/audit.model';
 import type { LoggedUserContext } from '@/models/common.model';
 import type {
+  ContactInUse,
   CreateLeadInput,
   DeleteLeadRequest,
   LeadContact,
   LeadDetailsRequest,
-  LeadHoldingContact,
   LeadFilterOptions,
   LeadListFilters,
   LeadListPage,
   LeadOutput,
   LeadSearch,
   LeadUpdateResult,
-  RestoreLeadRequest,
   UpdatableLeadField,
   UpdateLeadData,
   UpdateLeadInput,
@@ -35,27 +34,11 @@ export interface ILeadService {
   createLead(newLead: CreateLeadInput, loggedUserContext: LoggedUserContext): Promise<LeadOutput>;
   updateLead(request: UpdateLeadRequest, loggedUserContext: LoggedUserContext): Promise<LeadUpdateResult>;
   deleteLead(request: DeleteLeadRequest, loggedUserContext: LoggedUserContext): Promise<void>;
-  restoreLead(request: RestoreLeadRequest, loggedUserContext: LoggedUserContext): Promise<void>;
 }
 
-const MESSAGE_BY_CONTACT_HELD_BY_ACTIVE_LEAD: Record<LeadHoldingContact['heldContact'], string> = {
+const MESSAGE_BY_CONTACT_IN_USE: Record<ContactInUse, string> = {
   phone: LEAD_ERRORS.PHONE_IN_USE,
   email: LEAD_ERRORS.EMAIL_IN_USE,
-};
-
-const MESSAGE_FOR_ADMIN_BY_HELD_CONTACT: Record<LeadHoldingContact['heldContact'], string> = {
-  phone: LEAD_ERRORS.PHONE_HELD_BY_DELETED_LEAD,
-  email: LEAD_ERRORS.EMAIL_HELD_BY_DELETED_LEAD,
-};
-
-const MESSAGE_ON_EDIT_BY_CONTACT_HELD_BY_DELETED_LEAD: Record<LeadHoldingContact['heldContact'], string> = {
-  phone: LEAD_ERRORS.PHONE_OF_DELETED_LEAD_ON_EDIT,
-  email: LEAD_ERRORS.EMAIL_OF_DELETED_LEAD_ON_EDIT,
-};
-
-const MESSAGE_FOR_SELLER_BY_HELD_CONTACT: Record<LeadHoldingContact['heldContact'], string> = {
-  phone: LEAD_ERRORS.PHONE_IN_USE_ASK_ADMIN,
-  email: LEAD_ERRORS.EMAIL_IN_USE_ASK_ADMIN,
 };
 
 export class LeadService implements ILeadService {
@@ -88,7 +71,7 @@ export class LeadService implements ILeadService {
 
   async createLead(newLead: CreateLeadInput, loggedUserContext: LoggedUserContext): Promise<LeadOutput> {
     if (newLead.assignedToId) await this.assertAssigneeIsAvailable(newLead.assignedToId);
-    await this.assertContactIsAvailable({ phone: newLead.phone, email: newLead.email }, null, loggedUserContext);
+    await this.assertContactIsAvailable({ phone: newLead.phone, email: newLead.email }, null);
 
     const createdLead = await this.leadRepository.createLead({
       name: newLead.name,
@@ -119,11 +102,7 @@ export class LeadService implements ILeadService {
 
     const effectiveChanges = this.keepOnlyFields(leadChanges, updatedFields);
     if (effectiveChanges.assignedToId) await this.assertAssigneeIsAvailable(effectiveChanges.assignedToId);
-    await this.assertContactIsAvailable(
-      { phone: effectiveChanges.phone, email: effectiveChanges.email },
-      targetLeadId,
-      loggedUserContext,
-    );
+    await this.assertContactIsAvailable({ phone: effectiveChanges.phone, email: effectiveChanges.email }, targetLeadId);
 
     const leadData: UpdateLeadData = {
       name: effectiveChanges.name,
@@ -149,33 +128,20 @@ export class LeadService implements ILeadService {
     this.assertLoggedUserIsAdmin(loggedUserContext);
     const leadToDelete = await this.findExistingLeadOrFail(targetLeadId);
 
-    await this.leadRepository.softDeleteLead(targetLeadId, this.clock.now());
+    await this.leadRepository.eraseLead({
+      leadId: targetLeadId,
+      deletedAt: this.clock.now(),
+      deletedById: loggedUserContext.loggedUser.id,
+    });
     await this.recordLeadAuditLog(loggedUserContext, 'lead.delete', targetLeadId, {
       name: leadToDelete.name,
       phone: leadToDelete.phone,
     });
   }
 
-  async restoreLead({ targetLeadId }: RestoreLeadRequest, loggedUserContext: LoggedUserContext): Promise<void> {
-    this.assertLoggedUserIsAdmin(loggedUserContext);
-    const wasRestored = await this.leadRepository.restoreDeletedLead(targetLeadId);
-    if (!wasRestored) throw new NotFoundError(LEAD_ERRORS.DELETED_LEAD_NOT_FOUND);
-    await this.recordLeadAuditLog(loggedUserContext, 'lead.restore', targetLeadId, undefined);
-  }
-
-  private async assertContactIsAvailable(
-    contact: LeadContact,
-    leadBeingEdited: string | null,
-    { loggedUser }: LoggedUserContext,
-  ): Promise<void> {
-    const holder = await this.leadRepository.findLeadHoldingContact(contact, leadBeingEdited);
-    if (!holder) return;
-    if (!holder.isDeleted) throw new ConflictError(MESSAGE_BY_CONTACT_HELD_BY_ACTIVE_LEAD[holder.heldContact]);
-    if (leadBeingEdited !== null) throw new ConflictError(MESSAGE_ON_EDIT_BY_CONTACT_HELD_BY_DELETED_LEAD[holder.heldContact]);
-    if (loggedUser.role === Role.ADMIN) {
-      throw new DeletedLeadHoldsContactError(MESSAGE_FOR_ADMIN_BY_HELD_CONTACT[holder.heldContact], holder.leadId);
-    }
-    throw new ConflictError(MESSAGE_FOR_SELLER_BY_HELD_CONTACT[holder.heldContact]);
+  private async assertContactIsAvailable(contact: LeadContact, leadBeingEdited: string | null): Promise<void> {
+    const contactInUse = await this.leadRepository.findContactInUse(contact, leadBeingEdited);
+    if (contactInUse) throw new ConflictError(MESSAGE_BY_CONTACT_IN_USE[contactInUse]);
   }
 
   private listFieldsThatChange(existingLead: LeadOutput, leadChanges: UpdateLeadInput): UpdatableLeadField[] {

@@ -90,8 +90,6 @@ export interface LeadImportProgress {
   processedRows: number;
   importedLeads: number;
   skippedExistingLeads: number;
-  restoredLeads: number;
-  skippedDeletedLeads: number;
   addedToPipelineLeads: number;
   alreadyInPipelineLeads: number;
   importsIntoPipeline: boolean;

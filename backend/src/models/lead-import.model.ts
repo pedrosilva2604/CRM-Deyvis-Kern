@@ -1,4 +1,4 @@
-import type { LeadImport, LeadImportStatus, Role } from '@prisma/client';
+import type { LeadImport, LeadImportStatus } from '@prisma/client';
 
 export type LeadImportIdParams = {
   importId: string;
@@ -49,8 +49,6 @@ export interface CreateLeadImportData {
 export interface LeadImportOutcomeCounts {
   importedLeads: number;
   skippedExistingLeads: number;
-  restoredLeads: number;
-  skippedDeletedLeads: number;
   addedToPipelineLeads: number;
   alreadyInPipelineLeads: number;
 }
@@ -73,7 +71,6 @@ export interface LeadImportProgress extends LeadImportCounters {
 export interface LeadImportToProcess extends LeadImportCounters {
   importId: string;
   requestedById: string;
-  restoresDeletedLeads: boolean;
   destination: LeadImportDestination | null;
 }
 
@@ -88,7 +85,6 @@ export interface LeadImportRowToProcess {
 export interface LeadImportChunk {
   importId: string;
   processedRowsBefore: number;
-  restoresDeletedLeads: boolean;
   destination: LeadImportDestination | null;
   addedById: string;
   leadsToCreate: LeadImportRowToProcess[];
@@ -96,8 +92,6 @@ export interface LeadImportChunk {
 
 export interface LeadImportChunkResult {
   insertedLeads: number;
-  restoredLeads: number;
-  skippedDeletedLeads: number;
   addedToPipelineLeads: number;
   alreadyInPipelineLeads: number;
 }
@@ -113,8 +107,6 @@ function readOutcomeCounts(leadImport: LeadImport): LeadImportOutcomeCounts {
   return {
     importedLeads: leadImport.importedLeads,
     skippedExistingLeads: leadImport.skippedExistingLeads,
-    restoredLeads: leadImport.restoredLeads,
-    skippedDeletedLeads: leadImport.skippedDeletedLeads,
     addedToPipelineLeads: leadImport.addedToPipelineLeads,
     alreadyInPipelineLeads: leadImport.alreadyInPipelineLeads,
   };
@@ -150,11 +142,10 @@ export function toLeadImportProgress(leadImport: LeadImport): LeadImportProgress
   };
 }
 
-export function toLeadImportToProcess(leadImport: LeadImport, requesterRole: Role | null): LeadImportToProcess {
+export function toLeadImportToProcess(leadImport: LeadImport): LeadImportToProcess {
   return {
     importId: leadImport.id,
     requestedById: leadImport.requestedById,
-    restoresDeletedLeads: requesterRole === 'ADMIN',
     destination: readDestination(leadImport),
     rowsToImport: leadImport.rowsToImport,
     processedRows: leadImport.processedRows,
