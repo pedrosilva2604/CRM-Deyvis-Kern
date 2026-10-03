@@ -26,7 +26,7 @@ export interface CardDestination {
   expectedStageKind: StageKind;
 }
 
-export type CardPlacementOutcome = 'placed' | 'stageKindChanged';
+export type CardPlacementOutcome = 'placed' | 'stageKindChanged' | 'leadNotFound';
 
 export interface LockedStage extends StageKind {
   id: string;
@@ -43,10 +43,19 @@ export interface IPipelineCardRepository {
 export const CARD_POSITION_GAP = 1024;
 const SMALLEST_GAP_BEFORE_RENUMBERING = 1e-6;
 
+const cardsOfActiveLeads = { lead: { deletedAt: null } };
+
 export async function lockStagesForCardPlacement(transaction: DatabaseTransaction, stageIds: string[]): Promise<LockedStage[]> {
   const stageIdsInLockOrder = [...stageIds].sort();
   return await transaction.$queryRaw<LockedStage[]>`
     SELECT "id", "isWon", "isLost" FROM "Stage" WHERE "id" = ANY(${stageIdsInLockOrder}::uuid[]) ORDER BY "id" FOR UPDATE`;
+}
+
+export async function lockActiveLeadsForCardPlacement(transaction: DatabaseTransaction, leadIds: string[]): Promise<string[]> {
+  const leadIdsInLockOrder = [...leadIds].sort();
+  const lockedLeads = await transaction.$queryRaw<{ id: string }[]>`
+    SELECT "id" FROM "Lead" WHERE "id" = ANY(${leadIdsInLockOrder}::uuid[]) AND "deletedAt" IS NULL ORDER BY "id" FOR SHARE`;
+  return lockedLeads.map((lockedLead) => lockedLead.id);
 }
 
 export function isOpenStage({ isWon, isLost }: StageKind): boolean {
@@ -69,12 +78,12 @@ export class PipelineCardRepository implements IPipelineCardRepository {
   async findStageCardsPage(stageId: string, { afterPosition, limit }: StageCardsQuery): Promise<StageCardsPage> {
     const [cards, totalCards] = await Promise.all([
       this.prisma.pipelineCard.findMany({
-        where: { stageId, ...(afterPosition !== null && { position: { gt: afterPosition } }) },
+        where: { stageId, ...cardsOfActiveLeads, ...(afterPosition !== null && { position: { gt: afterPosition } }) },
         include: pipelineCardOutputRelations,
         orderBy: [{ position: 'asc' }, { id: 'asc' }],
         take: limit,
       }),
-      this.prisma.pipelineCard.count({ where: { stageId } }),
+      this.prisma.pipelineCard.count({ where: { stageId, ...cardsOfActiveLeads } }),
     ]);
     const lastCard = cards.at(-1);
     return {
@@ -96,6 +105,8 @@ export class PipelineCardRepository implements IPipelineCardRepository {
     return await this.prisma.$transaction(async (transaction) => {
       const lockedStage = await lockStageOrFail(transaction, stageId);
       if (!isSameStageKind(lockedStage, expectedStageKind)) return 'stageKindChanged';
+      const [activeLead] = await lockActiveLeadsForCardPlacement(transaction, [leadId]);
+      if (!activeLead) return 'leadNotFound';
       const position = await this.findPositionOnTop(transaction, stageId, null);
       await transaction.pipelineCard.create({ data: { pipelineId, stageId, leadId, addedById, position } });
       return 'placed';

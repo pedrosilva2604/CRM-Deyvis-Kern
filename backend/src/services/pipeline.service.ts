@@ -203,6 +203,7 @@ export class PipelineService implements IPipelineService {
       addedById: loggedUserContext.loggedUser.id,
       expectedStageKind: stage,
     });
+    if (cardPlacement === 'leadNotFound') throw new NotFoundError(LEAD_ERRORS.NOT_FOUND);
     if (cardPlacement === 'stageKindChanged') throw new ConflictError(PIPELINE_ERRORS.STAGE_CHANGED_MEANWHILE);
     await this.recordPipelineAuditLog(loggedUserContext, 'pipeline.card_add', targetPipelineId, { leadId: card.leadId, stageId: card.stageId });
     await this.pipelineChanges.announce(targetPipelineId);

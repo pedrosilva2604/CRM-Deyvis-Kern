@@ -101,7 +101,6 @@ export class LeadRepository implements ILeadRepository {
 
   async eraseLead({ leadId, deletedAt, deletedById }: LeadErasure): Promise<void> {
     await this.prisma.$transaction(async (transaction) => {
-      await transaction.pipelineCard.deleteMany({ where: { leadId } });
       await transaction.lead.update({
         where: { id: leadId },
         data: {
@@ -118,6 +117,7 @@ export class LeadRepository implements ILeadRepository {
         },
         select: { id: true },
       });
+      await transaction.pipelineCard.deleteMany({ where: { leadId } });
     });
   }
 

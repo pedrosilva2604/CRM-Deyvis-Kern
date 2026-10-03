@@ -160,6 +160,34 @@ describe('A etapa mudou de tipo entre a conferência e a gravação', () => {
   });
 });
 
+describe('Excluir o lead enquanto alguém coloca o cartão dele (em 20 disputas)', () => {
+  it('nunca sobra cartão de lead excluído, e a etapa continua listando', async () => {
+    const orphanCards: string[] = [];
+    const unexpectedFailures: string[] = [];
+
+    for (let dispute = 1; dispute <= 20; dispute += 1) {
+      await database.prepareEmptyDatabase();
+      maria = await database.addUser('Maria');
+      funnel = await database.addPipeline(maria, ['Novo lead']);
+      const stageId = funnel.stageIdByName['Novo lead']!;
+      const joao = await database.addLead({ name: 'João', phone: '+5511900000001' });
+
+      const [addition] = await Promise.allSettled([
+        cards.addCardOnTop({ pipelineId: funnel.pipelineId, stageId, leadId: joao, addedById: maria, expectedStageKind: OPEN_STAGE }),
+        new LeadRepository(database.client).eraseLead({ leadId: joao, deletedAt: new Date(), deletedById: maria }),
+      ]);
+
+      if (addition.status === 'rejected') unexpectedFailures.push(String(addition.reason));
+      const cardsOfDeletedLeads = await database.client.pipelineCard.count({ where: { lead: { deletedAt: { not: null } } } });
+      if (cardsOfDeletedLeads > 0) orphanCards.push(`disputa ${dispute}`);
+      await cards.findStageCardsPage(stageId, { afterPosition: null, limit: 50 });
+    }
+
+    expect(unexpectedFailures).toEqual([]);
+    expect(orphanCards).toEqual([]);
+  }, 120_000);
+});
+
 describe('Página de cartões de uma etapa', () => {
   it('o lead excluído sai do quadro junto com o cartão', async () => {
     await addLeadWithCard('Ana', '+5511900000001', newStage, 1024);
