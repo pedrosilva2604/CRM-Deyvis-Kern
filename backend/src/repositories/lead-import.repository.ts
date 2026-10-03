@@ -21,7 +21,7 @@ import {
 } from '@/repositories/pipeline-card.repository';
 
 export interface ILeadImportRepository {
-  createLeadImport(newLeadImport: CreateLeadImportData): Promise<string>;
+  createLeadImport(newLeadImport: CreateLeadImportData): Promise<string | null>;
   findLeadImportProgress(importId: string, requestedById: string | null): Promise<LeadImportProgress | null>;
   hasRunningLeadImport(requestedById: string): Promise<boolean>;
   startLeadImport(importId: string, startedAt: Date): Promise<LeadImportToProcess | null>;
@@ -30,7 +30,7 @@ export interface ILeadImportRepository {
   completeLeadImport(importId: string, finishedAt: Date): Promise<FinishedLeadImport | null>;
   failLeadImport(importId: string, failureReason: string, finishedAt: Date): Promise<FinishedLeadImport | null>;
   reopenFailedLeadImport(importId: string): Promise<boolean>;
-  findStalePendingImportIds(createdBefore: Date): Promise<string[]>;
+  findStalePendingImportIds(queuedBefore: Date): Promise<string[]>;
   findStaleProcessingImportIds(startedBefore: Date): Promise<string[]>;
   findFailedImportIdsFinishedBefore(finishedBefore: Date, onlyNotWarned: boolean): Promise<string[]>;
   expireLeadImport(importId: string): Promise<FinishedLeadImport | null>;
@@ -62,16 +62,22 @@ export class LeadImportChunkAlreadyProcessedError extends Error {
 export class LeadImportRepository implements ILeadImportRepository {
   constructor(private readonly prisma: DatabaseClient) {}
 
-  async createLeadImport({ rows, ...leadImportCounts }: CreateLeadImportData): Promise<string> {
-    const createdLeadImport = await this.prisma.leadImport.create({
-      data: {
-        ...leadImportCounts,
-        rowsToImport: rows.length,
-        rows: { createMany: { data: rows } },
-      },
-      select: { id: true },
+  async createLeadImport({ rows, ...leadImportCounts }: CreateLeadImportData): Promise<string | null> {
+    return await this.prisma.$transaction(async (transaction) => {
+      const { pipelineId, stageId } = leadImportCounts;
+      if (pipelineId !== null && stageId !== null && !(await this.lockDestinationAgainstDeletion(transaction, pipelineId, stageId))) {
+        return null;
+      }
+      const createdLeadImport = await transaction.leadImport.create({
+        data: {
+          ...leadImportCounts,
+          rowsToImport: rows.length,
+          rows: { createMany: { data: rows } },
+        },
+        select: { id: true },
+      });
+      return createdLeadImport.id;
     });
-    return createdLeadImport.id;
   }
 
   async findLeadImportProgress(importId: string, requestedById: string | null): Promise<LeadImportProgress | null> {
@@ -171,6 +177,7 @@ export class LeadImportRepository implements ILeadImportRepository {
       where: { id: importId, status: LeadImportStatus.FAILED },
       data: {
         status: LeadImportStatus.PENDING,
+        queuedAt: new Date(),
         failureReason: null,
         startedAt: null,
         finishedAt: null,
@@ -180,9 +187,9 @@ export class LeadImportRepository implements ILeadImportRepository {
     return reopening.count === 1;
   }
 
-  async findStalePendingImportIds(createdBefore: Date): Promise<string[]> {
+  async findStalePendingImportIds(queuedBefore: Date): Promise<string[]> {
     const staleImports = await this.prisma.leadImport.findMany({
-      where: { status: LeadImportStatus.PENDING, createdAt: { lt: createdBefore } },
+      where: { status: LeadImportStatus.PENDING, queuedAt: { lt: queuedBefore } },
       select: { id: true },
     });
     return staleImports.map(({ id }) => id);
@@ -225,6 +232,12 @@ export class LeadImportRepository implements ILeadImportRepository {
       data: { expiryWarningSentAt: sentAt },
     });
     return warning.count === 0 ? null : await this.findFinishedLeadImport(importId, sentAt);
+  }
+
+  private async lockDestinationAgainstDeletion(transaction: DatabaseTransaction, pipelineId: string, stageId: string): Promise<boolean> {
+    const lockedStages = await transaction.$queryRaw<{ id: string }[]>`
+      SELECT "id" FROM "Stage" WHERE "id" = ${stageId}::uuid AND "pipelineId" = ${pipelineId}::uuid FOR KEY SHARE`;
+    return lockedStages.length === 1;
   }
 
   private async placeLeadsOfRowsInPipeline(

@@ -258,6 +258,7 @@ model LeadImport {
   requestedBy            User             @relation(fields: [requestedById], references: [id], onDelete: Restrict)
   failureReason          String?
   createdAt              DateTime         @default(now())
+  queuedAt               DateTime         @default(now())
   startedAt              DateTime?
   finishedAt             DateTime?
   expiryWarningSentAt    DateTime?
@@ -265,6 +266,7 @@ model LeadImport {
   rows LeadImportRow[]
 
   @@index([status, createdAt])
+  @@index([status, queuedAt])
   @@index([status, finishedAt])
   @@index([requestedById])
 }

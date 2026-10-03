@@ -8,23 +8,26 @@ import {
   type ContactInUse,
   type CreateLeadData,
   type LeadContact,
+  type LeadCreation,
   type LeadErasure,
   type LeadListPage,
   type LeadListQuery,
   type LeadOutput,
   type LeadSearch,
+  type LeadUpdateOutcome,
   type LeadWithRelations,
   type UpdateLeadData,
 } from '@/models/lead.model';
 import type { DatabaseClient } from '@/repositories/database-client';
+import { lockAvailableUser } from '@/repositories/user-locks';
 
 
 export interface ILeadRepository {
   findLeadsPage(listQuery: LeadListQuery): Promise<LeadListPage>;
   findLeadById(leadId: string): Promise<LeadOutput | null>;
   findSourcesInUse(): Promise<string[]>;
-  createLead(newLead: CreateLeadData): Promise<LeadOutput>;
-  updateLead(leadId: string, leadChanges: UpdateLeadData): Promise<void>;
+  createLead(newLead: CreateLeadData): Promise<LeadCreation>;
+  updateLead(leadId: string, leadChanges: UpdateLeadData): Promise<LeadUpdateOutcome>;
   eraseLead(erasure: LeadErasure): Promise<void>;
   findContactInUse(contact: LeadContact, ignoredLeadId: string | null): Promise<ContactInUse | null>;
 }
@@ -90,13 +93,24 @@ export class LeadRepository implements ILeadRepository {
     return sources.flatMap(({ source }) => (source === null ? [] : [source]));
   }
 
-  async createLead(newLead: CreateLeadData): Promise<LeadOutput> {
-    const createdLead = await this.prisma.lead.create({ data: newLead, include: leadOutputRelations });
-    return toLeadOutput(createdLead);
+  async createLead(newLead: CreateLeadData): Promise<LeadCreation> {
+    return await this.prisma.$transaction(async (transaction) => {
+      if (newLead.assignedToId && !(await lockAvailableUser(transaction, newLead.assignedToId, null))) {
+        return { outcome: 'assigneeNotAvailable' };
+      }
+      const createdLead = await transaction.lead.create({ data: newLead, include: leadOutputRelations });
+      return { outcome: 'created', lead: toLeadOutput(createdLead) };
+    });
   }
 
-  async updateLead(leadId: string, leadChanges: UpdateLeadData): Promise<void> {
-    await this.prisma.lead.update({ where: { id: leadId }, data: leadChanges, select: { id: true } });
+  async updateLead(leadId: string, leadChanges: UpdateLeadData): Promise<LeadUpdateOutcome> {
+    return await this.prisma.$transaction(async (transaction) => {
+      if (leadChanges.assignedToId && !(await lockAvailableUser(transaction, leadChanges.assignedToId, null))) {
+        return 'assigneeNotAvailable';
+      }
+      const update = await transaction.lead.updateMany({ where: { id: leadId, ...notDeletedLeads }, data: leadChanges });
+      return update.count === 1 ? 'updated' : 'leadNotFound';
+    });
   }
 
   async eraseLead({ leadId, deletedAt, deletedById }: LeadErasure): Promise<void> {

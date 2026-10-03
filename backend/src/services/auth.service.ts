@@ -24,7 +24,7 @@ export class AuthService implements IAuthService {
 
   async loginUser(loginCredentials: LoginInput, requestOrigin: RequestOrigin): Promise<LoginResult> {
     const user = await this.findUserAllowedToLogin(loginCredentials, requestOrigin);
-    const session = await this.sessions.startSession(user.id, requestOrigin);
+    const session = await this.sessions.startSession(user.id, user.passwordHash, requestOrigin);
     await this.audit.recordAuditLog({ ...requestOrigin, userId: user.id }, { action: 'auth.login', entity: 'User', entityId: user.id });
     return { ...session, user: toProfileOutput(user) };
   }

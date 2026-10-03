@@ -160,6 +160,23 @@ describe('Excluir um lead (LGPD)', () => {
     await expect(database.client.lead.delete({ where: { id: joao } })).rejects.toThrow();
   });
 
+  it('uma edição que chega depois da exclusão não devolve os dados pessoais', async () => {
+    const joao = await database.addLead({ name: 'João', phone: '+5511900000001' });
+    await leads.eraseLead({ leadId: joao, deletedAt: new Date(), deletedById: database.funnel.ownerId });
+
+    expect(await leads.updateLead(joao, { name: 'João Pereira', phone: '+5511900000001' })).toBe('leadNotFound');
+    expect(await database.findLead(joao)).toMatchObject({ name: 'Lead excluído', phone: null });
+  });
+
+  it('não atribui o lead a um usuário excluído', async () => {
+    const vendedorExcluido = await database.addUser('Vendedor');
+    await database.client.user.update({ where: { id: vendedorExcluido }, data: { active: false, deletedAt: new Date() } });
+    const maria = await database.addLead({ name: 'Maria', phone: '+5511900000001' });
+
+    expect(await leads.updateLead(maria, { assignedToId: vendedorExcluido })).toBe('assigneeNotAvailable');
+    expect(await database.findLead(maria)).toMatchObject({ assignedToId: null });
+  });
+
   it('o banco não deixa um lead ativo ficar sem telefone', async () => {
     const maria = await database.addLead({ name: 'Maria', phone: '+5511900000001' });
 

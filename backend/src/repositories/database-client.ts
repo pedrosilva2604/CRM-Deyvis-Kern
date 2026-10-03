@@ -5,6 +5,7 @@ import { LEAD_ERRORS, LEAD_IMPORT_ERRORS, PIPELINE_ERRORS, REQUEST_ERRORS, USER_
 const DATABASE_UNAVAILABLE_ERROR_CODES = new Set(['P1001', 'P1002', 'P1008', 'P1017', 'P2024']);
 const UNIQUE_CONSTRAINT_VIOLATION_ERROR_CODE = 'P2002';
 const RECORD_NOT_FOUND_ERROR_CODE = 'P2025';
+const FOREIGN_KEY_VIOLATION_ERROR_CODE = 'P2003';
 
 const NOT_FOUND_MESSAGE_BY_MODEL: Partial<Record<Prisma.ModelName, string>> = {
   Lead: LEAD_ERRORS.NOT_FOUND,
@@ -48,6 +49,7 @@ function describeDuplicatedRecord(model: string | undefined, error: Prisma.Prism
 
 function translateDatabaseError(error: unknown, model: string | undefined): never {
   if (hasPrismaErrorCode(error, RECORD_NOT_FOUND_ERROR_CODE)) throw new NotFoundError(describeMissingRecord(model));
+  if (hasPrismaErrorCode(error, FOREIGN_KEY_VIOLATION_ERROR_CODE)) throw new ConflictError(REQUEST_ERRORS.RESOURCE_CHANGED_MEANWHILE);
   if (hasPrismaErrorCode(error, UNIQUE_CONSTRAINT_VIOLATION_ERROR_CODE)) {
     throw new ConflictError(describeDuplicatedRecord(model, error));
   }

@@ -13,6 +13,7 @@ import {
 } from '@/models/pipeline.model';
 import type { DatabaseClient, DatabaseTransaction } from '@/repositories/database-client';
 import { CARD_POSITION_GAP, lockStagesForCardPlacement } from '@/repositories/pipeline-card.repository';
+import { lockAvailableUser } from '@/repositories/user-locks';
 
 export interface PipelineViewer {
   userId: string;
@@ -25,11 +26,10 @@ export interface IPipelineRepository {
   findPipelineAccess(pipelineId: string, viewer: PipelineViewer): Promise<PipelineAccess | null>;
   findPeopleWithAccess(pipelineId: string): Promise<string[]>;
   findInvitableUsers(pipelineId: string): Promise<PipelinePersonOutput[]>;
-  isActiveUser(userId: string, role: Role | null): Promise<boolean>;
-  createPipeline(name: string, ownerId: string): Promise<string>;
+  createPipeline(name: string, ownerId: string): Promise<string | null>;
   renamePipeline(pipelineId: string, name: string): Promise<void>;
   deletePipeline(pipelineId: string): Promise<void>;
-  addMember(pipelineId: string, userId: string, addedById: string): Promise<void>;
+  addMember(pipelineId: string, userId: string, addedById: string): Promise<MemberAdditionOutcome>;
   removeMember(pipelineId: string, userId: string): Promise<boolean>;
   findStage(stageId: string): Promise<StageRecord | null>;
   findStageIds(pipelineId: string): Promise<string[]>;
@@ -40,6 +40,7 @@ export interface IPipelineRepository {
 }
 
 export type StageCreationOutcome = 'created' | 'pipelineNotFound' | 'tooManyStages';
+export type MemberAdditionOutcome = 'added' | 'memberNotAvailable' | 'pipelineNotFound';
 export type StageUpdateOutcome = 'updated' | 'stageNotFound' | 'cardsWithoutWonValue';
 export type StageReorderOutcome = 'reordered' | 'pipelineNotFound' | 'stageOrderInvalid';
 export type StageDeletionOutcome = 'deleted' | 'pipelineNotFound' | 'stageNotFound' | 'lastStage' | 'cardsWithoutWonValue';
@@ -93,6 +94,7 @@ export class PipelineRepository implements IPipelineRepository {
     const people = await this.prisma.user.findMany({
       where: {
         active: true,
+        deletedAt: null,
         OR: [
           { role: Role.ADMIN },
           { ownedPipelines: { some: { id: pipelineId } } },
@@ -108,6 +110,7 @@ export class PipelineRepository implements IPipelineRepository {
     return await this.prisma.user.findMany({
       where: {
         active: true,
+        deletedAt: null,
         role: Role.AGENT,
         ownedPipelines: { none: { id: pipelineId } },
         pipelineMemberships: { none: { pipelineId } },
@@ -117,16 +120,15 @@ export class PipelineRepository implements IPipelineRepository {
     });
   }
 
-  async isActiveUser(userId: string, role: Role | null): Promise<boolean> {
-    return (await this.prisma.user.count({ where: { id: userId, active: true, ...(role !== null && { role }) } })) > 0;
-  }
-
-  async createPipeline(name: string, ownerId: string): Promise<string> {
-    const createdPipeline = await this.prisma.pipeline.create({
-      data: { name, ownerId, stages: { create: DEFAULT_PIPELINE_STAGES } },
-      select: { id: true },
+  async createPipeline(name: string, ownerId: string): Promise<string | null> {
+    return await this.prisma.$transaction(async (transaction) => {
+      if (!(await lockAvailableUser(transaction, ownerId, null))) return null;
+      const createdPipeline = await transaction.pipeline.create({
+        data: { name, ownerId, stages: { create: DEFAULT_PIPELINE_STAGES } },
+        select: { id: true },
+      });
+      return createdPipeline.id;
     });
-    return createdPipeline.id;
   }
 
   async renamePipeline(pipelineId: string, name: string): Promise<void> {
@@ -142,8 +144,13 @@ export class PipelineRepository implements IPipelineRepository {
     });
   }
 
-  async addMember(pipelineId: string, userId: string, addedById: string): Promise<void> {
-    await this.prisma.pipelineMember.create({ data: { pipelineId, userId, addedById } });
+  async addMember(pipelineId: string, userId: string, addedById: string): Promise<MemberAdditionOutcome> {
+    return await this.prisma.$transaction(async (transaction) => {
+      if (!(await lockAvailableUser(transaction, userId, Role.AGENT))) return 'memberNotAvailable';
+      if (!(await this.lockPipelineAgainstDeletion(transaction, pipelineId))) return 'pipelineNotFound';
+      await transaction.pipelineMember.create({ data: { pipelineId, userId, addedById } });
+      return 'added';
+    });
   }
 
   async removeMember(pipelineId: string, userId: string): Promise<boolean> {
@@ -248,6 +255,11 @@ export class PipelineRepository implements IPipelineRepository {
   private async lockStagesStructureOf(transaction: DatabaseTransaction, pipelineId: string): Promise<boolean> {
     const lockedPipelines = await transaction.$queryRaw<{ id: string }[]>`
       SELECT "id" FROM "Pipeline" WHERE "id" = ${pipelineId}::uuid FOR NO KEY UPDATE`;
+    return lockedPipelines.length === 1;
+  }
+
+  private async lockPipelineAgainstDeletion(transaction: DatabaseTransaction, pipelineId: string): Promise<boolean> {
+    const lockedPipelines = await transaction.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Pipeline" WHERE "id" = ${pipelineId}::uuid FOR KEY SHARE`;
     return lockedPipelines.length === 1;
   }
 

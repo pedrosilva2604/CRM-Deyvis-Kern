@@ -283,6 +283,37 @@ describe('Excluir um funil', () => {
   });
 });
 
+describe('Vínculos com usuários que acabaram de ser excluídos', () => {
+  async function addDeletedUser(name: string): Promise<string> {
+    const userId = await database.addUser(name);
+    await database.client.user.update({ where: { id: userId }, data: { active: false, deletedAt: new Date() } });
+    return userId;
+  }
+
+  it('não convida para o funil um vendedor excluído', async () => {
+    const maria = await database.addUser('Maria');
+    const funnelOfMaria = await database.addPipeline(maria, ['Novo lead']);
+    const joao = await addDeletedUser('João');
+
+    expect(await pipelines.addMember(funnelOfMaria.pipelineId, joao, maria)).toBe('memberNotAvailable');
+    expect(await database.client.pipelineMember.count({ where: { userId: joao } })).toBe(0);
+  });
+
+  it('não convida para um funil que acabou de ser excluído', async () => {
+    const maria = await database.addUser('Maria');
+    const joao = await database.addUser('João');
+
+    expect(await pipelines.addMember('00000000-0000-4000-8000-000000000000', joao, maria)).toBe('pipelineNotFound');
+  });
+
+  it('não cria funil para um dono excluído', async () => {
+    const joao = await addDeletedUser('João');
+
+    expect(await pipelines.createPipeline('Funil do João', joao)).toBeNull();
+    expect(await database.findPipelinesOwnedBy(joao)).toEqual([]);
+  });
+});
+
 describe('Funil de cada usuário', () => {
   it('quem é cadastrado já ganha um funil com as 5 etapas padrão', async () => {
     const joao = await users.createUser({ name: 'João', email: 'joao@teste.local', passwordHash: 'x', role: 'AGENT' });

@@ -79,6 +79,29 @@ describe('Gravação de um pedaço da importação', () => {
   });
 });
 
+describe('Registrar a importação', () => {
+  it('não registra a importação para uma etapa que acabou de ser excluída', async () => {
+    const maria = await database.addUser('Maria');
+    const funnel = await database.addPipeline(maria, ['Novo lead']);
+    const stageId = funnel.stageIdByName['Novo lead']!;
+    await database.client.pipeline.delete({ where: { id: funnel.pipelineId } });
+
+    const importId = await leadImports.createLeadImport({ ...newImportRequestedBy(maria), pipelineId: funnel.pipelineId, stageId });
+
+    expect(importId).toBeNull();
+  });
+
+  it('a importação retomada volta para a fila agora, e não parece parada há tempo', async () => {
+    const maria = await database.addUser('Maria');
+    const importId = await database.addLeadImport({ requestedById: maria, status: 'FAILED' });
+    await database.client.leadImport.update({ where: { id: importId }, data: { createdAt: new Date('2026-09-01'), queuedAt: new Date('2026-09-01') } });
+
+    await leadImports.reopenFailedLeadImport(importId);
+
+    expect(await leadImports.findStalePendingImportIds(new Date(Date.now() - 60_000))).not.toContain(importId);
+  });
+});
+
 describe('Lead excluído na importação', () => {
   it('o telefone e o e-mail de um lead excluído voltam como um lead novo, sem nada do antigo', async () => {
     const maria = await database.addUser('Maria');

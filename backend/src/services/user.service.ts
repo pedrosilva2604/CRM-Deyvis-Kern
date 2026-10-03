@@ -82,6 +82,7 @@ export class UserService implements IUserService, IUserPasswordUpdater {
     await this.findExistingUserOrFail(targetUserId);
 
     const activated = await this.userRepository.activateUser(targetUserId);
+    if (!activated) throw new NotFoundError(USER_ERRORS.NOT_FOUND);
     await this.recordUserAuditLog(loggedUserContext, 'user.activate', targetUserId, undefined);
     return activated;
   }
@@ -124,12 +125,13 @@ export class UserService implements IUserService, IUserPasswordUpdater {
     const targetUser = await this.findExistingUserOrFail(targetUserId);
     this.assertIsNotSelf(targetUser, loggedUserContext);
 
-    const wasDeleted = await this.userRepository.deleteUserKeepingAnActiveAdmin(
+    const userDeletion = await this.userRepository.deleteUserKeepingAnActiveAdmin(
       targetUserId,
       loggedUserContext.loggedUser.id,
       this.clock.now(),
     );
-    if (!wasDeleted) throw new BadRequestError(USER_ERRORS.LAST_ADMIN);
+    if (userDeletion === 'lastAdmin') throw new BadRequestError(USER_ERRORS.LAST_ADMIN);
+    if (userDeletion === 'actorNotAdmin') throw new ForbiddenError(AUTH_ERRORS.ACCESS_DENIED);
     this.sessions.notifyAllUserSessionsEnded(targetUserId);
     await this.recordUserAuditLog(loggedUserContext, 'user.delete', targetUserId, {
       name: targetUser.name,

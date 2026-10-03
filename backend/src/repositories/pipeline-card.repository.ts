@@ -20,13 +20,14 @@ export interface NewCard {
 }
 
 export interface CardDestination {
+  expectedOriginStageId: string;
   stageId: string;
   previousCardId: string | null;
   closing: CardClosing | undefined;
   expectedStageKind: StageKind;
 }
 
-export type CardPlacementOutcome = 'placed' | 'stageKindChanged' | 'leadNotFound';
+export type CardPlacementOutcome = 'placed' | 'stageKindChanged' | 'leadNotFound' | 'boardChangedMeanwhile';
 
 export interface LockedStage extends StageKind {
   id: string;
@@ -113,10 +114,17 @@ export class PipelineCardRepository implements IPipelineCardRepository {
     });
   }
 
-  async moveCard(cardId: string, { stageId, previousCardId, closing, expectedStageKind }: CardDestination): Promise<CardPlacementOutcome> {
+  async moveCard(
+    cardId: string,
+    { expectedOriginStageId, stageId, previousCardId, closing, expectedStageKind }: CardDestination,
+  ): Promise<CardPlacementOutcome> {
     return await this.prisma.$transaction(async (transaction) => {
-      const lockedStage = await lockStageOrFail(transaction, stageId);
-      if (!isSameStageKind(lockedStage, expectedStageKind)) return 'stageKindChanged';
+      const lockedStages = await lockStagesForCardPlacement(transaction, [...new Set([expectedOriginStageId, stageId])]);
+      const destinationStage = lockedStages.find((lockedStage) => lockedStage.id === stageId);
+      if (!destinationStage) throw new NotFoundError(PIPELINE_ERRORS.STAGE_NOT_FOUND);
+      if (!isSameStageKind(destinationStage, expectedStageKind)) return 'stageKindChanged';
+      if (!(await this.isCardIn(transaction, cardId, expectedOriginStageId))) return 'boardChangedMeanwhile';
+      if (previousCardId !== null && !(await this.isCardIn(transaction, previousCardId, stageId))) return 'boardChangedMeanwhile';
       const position =
         previousCardId === null
           ? await this.findPositionOnTop(transaction, stageId, cardId)
@@ -128,6 +136,10 @@ export class PipelineCardRepository implements IPipelineCardRepository {
 
   async removeCard(cardId: string): Promise<void> {
     await this.prisma.pipelineCard.delete({ where: { id: cardId } });
+  }
+
+  private async isCardIn(transaction: DatabaseTransaction, cardId: string, stageId: string): Promise<boolean> {
+    return (await transaction.pipelineCard.count({ where: { id: cardId, stageId } })) === 1;
   }
 
   private async findPositionOnTop(transaction: DatabaseTransaction, stageId: string, movingCardId: string | null): Promise<number> {

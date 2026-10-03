@@ -84,9 +84,9 @@ export class PipelineService implements IPipelineService {
     if (chosenOwnerId !== loggedUser.id && loggedUser.role !== Role.ADMIN) {
       throw new ForbiddenError(PIPELINE_ERRORS.ONLY_ADMIN_CHOOSES_OWNER);
     }
-    if (!(await this.pipelineRepository.isActiveUser(chosenOwnerId, null))) throw new BadRequestError(PIPELINE_ERRORS.OWNER_NOT_AVAILABLE);
 
     const createdPipelineId = await this.pipelineRepository.createPipeline(name, chosenOwnerId);
+    if (createdPipelineId === null) throw new BadRequestError(PIPELINE_ERRORS.OWNER_NOT_AVAILABLE);
     await this.recordPipelineAuditLog(loggedUserContext, 'pipeline.create', createdPipelineId, { name, ownerId: chosenOwnerId });
   }
 
@@ -113,11 +113,10 @@ export class PipelineService implements IPipelineService {
   async addMember({ targetPipelineId, targetUserId }: PipelineMemberRequest, loggedUserContext: LoggedUserContext): Promise<void> {
     const access = await this.findManagingAccessOrFail(targetPipelineId, loggedUserContext);
     if (targetUserId === access.ownerId) throw new BadRequestError(PIPELINE_ERRORS.OWNER_ALREADY_HAS_ACCESS);
-    if (!(await this.pipelineRepository.isActiveUser(targetUserId, Role.AGENT))) {
-      throw new BadRequestError(PIPELINE_ERRORS.MEMBER_NOT_AVAILABLE);
-    }
 
-    await this.pipelineRepository.addMember(targetPipelineId, targetUserId, loggedUserContext.loggedUser.id);
+    const memberAddition = await this.pipelineRepository.addMember(targetPipelineId, targetUserId, loggedUserContext.loggedUser.id);
+    if (memberAddition === 'memberNotAvailable') throw new BadRequestError(PIPELINE_ERRORS.MEMBER_NOT_AVAILABLE);
+    if (memberAddition === 'pipelineNotFound') throw new NotFoundError(PIPELINE_ERRORS.NOT_FOUND);
     await this.recordPipelineAuditLog(loggedUserContext, 'pipeline.member_add', targetPipelineId, { userId: targetUserId });
     await this.notifyNewMember(targetPipelineId, targetUserId);
     await this.pipelineChanges.announce(targetPipelineId);
@@ -217,12 +216,14 @@ export class PipelineService implements IPipelineService {
     const changesStage = destinationStage.id !== card.stageId;
 
     const cardPlacement = await this.cardRepository.moveCard(targetCardId, {
+      expectedOriginStageId: card.stageId,
       stageId: destinationStage.id,
       previousCardId: move.previousCardId,
       closing: changesStage ? this.decideClosing(destinationStage, move) : undefined,
       expectedStageKind: destinationStage,
     });
     if (cardPlacement === 'stageKindChanged') throw new ConflictError(PIPELINE_ERRORS.STAGE_CHANGED_MEANWHILE);
+    if (cardPlacement === 'boardChangedMeanwhile') throw new ConflictError(PIPELINE_ERRORS.BOARD_CHANGED_MEANWHILE);
     if (changesStage) {
       await this.recordPipelineAuditLog(loggedUserContext, 'pipeline.card_move', targetPipelineId, {
         leadId: card.leadId,

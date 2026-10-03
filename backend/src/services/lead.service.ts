@@ -70,10 +70,9 @@ export class LeadService implements ILeadService {
   }
 
   async createLead(newLead: CreateLeadInput, loggedUserContext: LoggedUserContext): Promise<LeadOutput> {
-    if (newLead.assignedToId) await this.assertAssigneeIsAvailable(newLead.assignedToId);
     await this.assertContactIsAvailable({ phone: newLead.phone, email: newLead.email }, null);
 
-    const createdLead = await this.leadRepository.createLead({
+    const leadCreation = await this.leadRepository.createLead({
       name: newLead.name,
       phone: newLead.phone,
       phoneCountry: this.countryOfPhone(newLead.phone),
@@ -84,9 +83,10 @@ export class LeadService implements ILeadService {
       enteredOn: this.readEnteredOnOrToday(newLead.enteredOn),
       assignedToId: newLead.assignedToId,
     });
+    if (leadCreation.outcome === 'assigneeNotAvailable') throw new BadRequestError(LEAD_ERRORS.ASSIGNEE_NOT_AVAILABLE);
 
-    await this.recordLeadAuditLog(loggedUserContext, 'lead.create', createdLead.id, undefined);
-    return createdLead;
+    await this.recordLeadAuditLog(loggedUserContext, 'lead.create', leadCreation.lead.id, undefined);
+    return leadCreation.lead;
   }
 
   async updateLead(
@@ -98,7 +98,6 @@ export class LeadService implements ILeadService {
     if (updatedFields.length === 0) return { updatedFields };
 
     const effectiveChanges = this.keepOnlyFields(leadChanges, updatedFields);
-    if (effectiveChanges.assignedToId) await this.assertAssigneeIsAvailable(effectiveChanges.assignedToId);
     await this.assertContactIsAvailable({ phone: effectiveChanges.phone, email: effectiveChanges.email }, targetLeadId);
 
     const leadData: UpdateLeadData = {
@@ -116,7 +115,9 @@ export class LeadService implements ILeadService {
       ...(effectiveChanges.enteredOn && { enteredOn: this.readEnteredOnOrToday(effectiveChanges.enteredOn) }),
     };
 
-    await this.leadRepository.updateLead(targetLeadId, leadData);
+    const leadUpdate = await this.leadRepository.updateLead(targetLeadId, leadData);
+    if (leadUpdate === 'leadNotFound') throw new NotFoundError(LEAD_ERRORS.NOT_FOUND);
+    if (leadUpdate === 'assigneeNotAvailable') throw new BadRequestError(LEAD_ERRORS.ASSIGNEE_NOT_AVAILABLE);
     await this.recordLeadAuditLog(loggedUserContext, 'lead.update', targetLeadId, { updatedFields });
     return { updatedFields };
   }
@@ -164,10 +165,6 @@ export class LeadService implements ILeadService {
     const lead = await this.leadRepository.findLeadById(leadId);
     if (!lead) throw new NotFoundError(LEAD_ERRORS.NOT_FOUND);
     return lead;
-  }
-
-  private async assertAssigneeIsAvailable(assigneeId: string): Promise<void> {
-    if (!(await this.userRepository.isActiveUser(assigneeId))) throw new BadRequestError(LEAD_ERRORS.ASSIGNEE_NOT_AVAILABLE);
   }
 
   private assertLoggedUserIsAdmin({ loggedUser }: LoggedUserContext): void {

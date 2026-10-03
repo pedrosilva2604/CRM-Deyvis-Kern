@@ -123,6 +123,10 @@ export interface LeadContact {
 
 export type ContactInUse = 'phone' | 'email';
 
+export type LeadCreation = { outcome: 'created'; lead: LeadOutput } | { outcome: 'assigneeNotAvailable' };
+
+export type LeadUpdateOutcome = 'updated' | 'leadNotFound' | 'assigneeNotAvailable';
+
 export interface LeadErasure {
   leadId: string;
   deletedAt: Date;

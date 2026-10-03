@@ -53,10 +53,21 @@ describe('Erros do banco traduzidos para o usuário', () => {
   it('alterar um lead que não existe vira "não encontrado" (404)', async () => {
     const leadThatDoesNotExist = randomUUID();
 
-    const update = leads.updateLead(leadThatDoesNotExist, { name: 'Novo nome' });
+    const update = database.client.lead.update({ where: { id: leadThatDoesNotExist }, data: { name: 'Novo nome' } });
 
     await expect(update).rejects.toBeInstanceOf(NotFoundError);
     await expect(update).rejects.toThrow(LEAD_ERRORS.NOT_FOUND);
+  });
+
+  it('apontar para algo que acabou de ser excluído vira conflito (409), e não erro 500', async () => {
+    const lead = await database.addLead({ name: 'Maria', phone: '+5511900000001' });
+
+    const cardInDeletedStage = database.client.pipelineCard.create({
+      data: { pipelineId: database.funnel.pipelineId, stageId: randomUUID(), leadId: lead, addedById: database.funnel.ownerId, position: 1024 },
+    });
+
+    await expect(cardInDeletedStage).rejects.toBeInstanceOf(ConflictError);
+    await expect(cardInDeletedStage).rejects.toThrow(REQUEST_ERRORS.RESOURCE_CHANGED_MEANWHILE);
   });
 
   it('banco fora do ar vira "serviço indisponível" (503), sem mostrar o erro técnico', async () => {

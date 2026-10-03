@@ -67,6 +67,7 @@ export class LeadImportService implements ILeadImportService {
       requestedById: loggedUserContext.loggedUser.id,
       rows: spreadsheetContent.rowsToImport.map((row) => this.toLeadImportRowData(row)),
     });
+    if (importId === null) throw new NotFoundError(PIPELINE_ERRORS.STAGE_NOT_FOUND);
     await this.recordImportRequested(loggedUserContext, importId, spreadsheetContent, destination);
     await this.enqueueOrLeaveForReconciler(importId);
     return { importId };

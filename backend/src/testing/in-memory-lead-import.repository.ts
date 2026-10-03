@@ -32,6 +32,7 @@ export interface StoredLeadImport {
   alreadyInPipelineLeads: number;
   failureReason: string | null;
   createdAt: Date;
+  queuedAt: Date;
   startedAt: Date | null;
   finishedAt: Date | null;
   expiryWarningSentAt: Date | null;
@@ -50,6 +51,7 @@ export class InMemoryLeadImportRepository implements ILeadImportRepository {
 
   add(newLeadImport: NewStoredLeadImport): StoredLeadImport {
     const rows = newLeadImport.rows ?? [];
+    const createdAt = newLeadImport.createdAt ?? new Date();
     const storedImport: StoredLeadImport = {
       status: 'PENDING',
       requestedById: 'usuario-que-importou',
@@ -65,7 +67,8 @@ export class InMemoryLeadImportRepository implements ILeadImportRepository {
       addedToPipelineLeads: 0,
       alreadyInPipelineLeads: 0,
       failureReason: null,
-      createdAt: new Date(),
+      createdAt,
+      queuedAt: createdAt,
       startedAt: null,
       finishedAt: null,
       expiryWarningSentAt: null,
@@ -86,7 +89,7 @@ export class InMemoryLeadImportRepository implements ILeadImportRepository {
     return storedImport;
   }
 
-  async createLeadImport({ rows, ...leadImportCounts }: CreateLeadImportData): Promise<string> {
+  async createLeadImport({ rows, ...leadImportCounts }: CreateLeadImportData): Promise<string | null> {
     this.createdImports += 1;
     const importId = `importacao-criada-${this.createdImports}`;
     this.add({ importId, ...leadImportCounts, rows, rowsToImport: rows.length });
@@ -173,10 +176,11 @@ export class InMemoryLeadImportRepository implements ILeadImportRepository {
   async reopenFailedLeadImport(importId: string): Promise<boolean> {
     const storedImport = this.find(importId);
     if (storedImport.status !== 'FAILED') return false;
-    if (storedImport.requestedById !== null && (await this.hasRunningLeadImport(storedImport.requestedById))) {
+    if (await this.hasRunningLeadImport(storedImport.requestedById)) {
       throw new ConflictError(LEAD_IMPORT_ERRORS.ALREADY_RUNNING);
     }
     storedImport.status = 'PENDING';
+    storedImport.queuedAt = new Date();
     storedImport.failureReason = null;
     storedImport.startedAt = null;
     storedImport.finishedAt = null;
@@ -184,8 +188,8 @@ export class InMemoryLeadImportRepository implements ILeadImportRepository {
     return true;
   }
 
-  async findStalePendingImportIds(createdBefore: Date): Promise<string[]> {
-    return this.findImportIds((storedImport) => storedImport.status === 'PENDING' && storedImport.createdAt < createdBefore);
+  async findStalePendingImportIds(queuedBefore: Date): Promise<string[]> {
+    return this.findImportIds((storedImport) => storedImport.status === 'PENDING' && storedImport.queuedAt < queuedBefore);
   }
 
   async findStaleProcessingImportIds(startedBefore: Date): Promise<string[]> {
