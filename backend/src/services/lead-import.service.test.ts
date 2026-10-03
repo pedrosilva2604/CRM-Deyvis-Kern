@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ConflictError, NotFoundError } from '@/errors/app-errors';
-import { LEAD_IMPORT_ERRORS } from '@/errors/errors.constants';
+import { BadRequestError, ConflictError, NotFoundError } from '@/errors/app-errors';
+import { LEAD_IMPORT_ERRORS, PIPELINE_ERRORS } from '@/errors/errors.constants';
 import { TimeZoneBusinessCalendar } from '@/infra/business-calendar';
 import { FixedClock } from '@/testing/fixed-clock';
 import { InMemoryLeadImportQueue } from '@/testing/in-memory-lead-import.queue';
 import { InMemoryLeadImportRepository } from '@/testing/in-memory-lead-import.repository';
-import { InMemoryPipelineRepository } from '@/testing/in-memory-pipeline.repository';
+import { InMemoryPipelineAccess } from '@/testing/in-memory-pipeline-access';
 import { loggedAdmin, loggedSeller } from '@/testing/logged-users';
 import { RecordingAuditService } from '@/testing/recording-audit.service';
 import { LeadImportService } from './lead-import.service';
@@ -16,19 +16,42 @@ function createRetryScenario() {
   const leadImports = new InMemoryLeadImportRepository();
   const leadImportQueue = new InMemoryLeadImportQueue();
   const audit = new RecordingAuditService();
+  const pipelines = new InMemoryPipelineAccess();
   const leadImportService = new LeadImportService(
     leadImports,
-    new InMemoryPipelineRepository(),
+    pipelines,
     leadImportQueue,
     audit,
     new TimeZoneBusinessCalendar(clock, 'America/Sao_Paulo'),
     { maximumRows: 10_000 },
   );
-  return { leadImportService, leadImports, leadImportQueue, audit };
+  return { leadImportService, leadImports, leadImportQueue, audit, pipelines };
 }
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+describe('Importar direto numa etapa do funil', () => {
+  const spreadsheet = 'nome,telefone\nCliente,11900000001';
+
+  it.each([
+    ['Ganho', { isWon: true }],
+    ['Perdido', { isLost: true }],
+  ])('recusa importar numa etapa de %s, sem registrar nada', async (_, closing) => {
+    const { leadImportService, leadImports, pipelines } = createRetryScenario();
+    pipelines.grant('funil-da-maria', 'maria', 'owner');
+    pipelines.addStage('etapa-fechada', 'funil-da-maria', closing);
+
+    const importIntoClosedStage = leadImportService.requestLeadImportIntoPipeline(
+      { targetPipelineId: 'funil-da-maria', targetStageId: 'etapa-fechada', csvText: spreadsheet },
+      loggedSeller('maria'),
+    );
+
+    await expect(importIntoClosedStage).rejects.toBeInstanceOf(BadRequestError);
+    await expect(importIntoClosedStage).rejects.toThrow(PIPELINE_ERRORS.IMPORT_ONLY_INTO_OPEN_STAGE);
+    expect(leadImports.countAll()).toBe(0);
+  });
 });
 
 describe('Retomar uma importação interrompida', () => {

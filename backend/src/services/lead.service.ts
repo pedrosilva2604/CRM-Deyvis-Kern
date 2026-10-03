@@ -1,31 +1,29 @@
 import { Role } from '@prisma/client';
 import { readLeadPhone, readSpreadsheetDate } from '@crm/shared';
-import { BadRequestError, ConflictError, DeletedLeadHoldsContactError, ForbiddenError, NotFoundError } from '@/errors/app-errors';
+import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from '@/errors/app-errors';
 import { AUTH_ERRORS, LEAD_ERRORS } from '@/errors/errors.constants';
 import type { BusinessCalendar } from '@/infra/business-calendar';
 import type { Clock } from '@/infra/clock';
 import type { AuditLogInput } from '@/models/audit.model';
 import type { LoggedUserContext } from '@/models/common.model';
 import type {
+  ContactInUse,
   CreateLeadInput,
   DeleteLeadRequest,
   LeadContact,
   LeadDetailsRequest,
-  LeadHoldingContact,
   LeadFilterOptions,
   LeadListFilters,
   LeadListPage,
   LeadOutput,
   LeadSearch,
   LeadUpdateResult,
-  RestoreLeadRequest,
   UpdatableLeadField,
   UpdateLeadData,
   UpdateLeadInput,
   UpdateLeadRequest,
 } from '@/models/lead.model';
 import type { ILeadRepository } from '@/repositories/lead.repository';
-import type { IPipelineRepository, StageLocation } from '@/repositories/pipeline.repository';
 import type { IUserRepository } from '@/repositories/user.repository';
 import type { IAuditService } from './audit.service';
 
@@ -36,33 +34,16 @@ export interface ILeadService {
   createLead(newLead: CreateLeadInput, loggedUserContext: LoggedUserContext): Promise<LeadOutput>;
   updateLead(request: UpdateLeadRequest, loggedUserContext: LoggedUserContext): Promise<LeadUpdateResult>;
   deleteLead(request: DeleteLeadRequest, loggedUserContext: LoggedUserContext): Promise<void>;
-  restoreLead(request: RestoreLeadRequest, loggedUserContext: LoggedUserContext): Promise<void>;
 }
 
-const MESSAGE_BY_CONTACT_HELD_BY_ACTIVE_LEAD: Record<LeadHoldingContact['heldContact'], string> = {
+const MESSAGE_BY_CONTACT_IN_USE: Record<ContactInUse, string> = {
   phone: LEAD_ERRORS.PHONE_IN_USE,
   email: LEAD_ERRORS.EMAIL_IN_USE,
-};
-
-const MESSAGE_FOR_ADMIN_BY_HELD_CONTACT: Record<LeadHoldingContact['heldContact'], string> = {
-  phone: LEAD_ERRORS.PHONE_HELD_BY_DELETED_LEAD,
-  email: LEAD_ERRORS.EMAIL_HELD_BY_DELETED_LEAD,
-};
-
-const MESSAGE_ON_EDIT_BY_CONTACT_HELD_BY_DELETED_LEAD: Record<LeadHoldingContact['heldContact'], string> = {
-  phone: LEAD_ERRORS.PHONE_OF_DELETED_LEAD_ON_EDIT,
-  email: LEAD_ERRORS.EMAIL_OF_DELETED_LEAD_ON_EDIT,
-};
-
-const MESSAGE_FOR_SELLER_BY_HELD_CONTACT: Record<LeadHoldingContact['heldContact'], string> = {
-  phone: LEAD_ERRORS.PHONE_IN_USE_ASK_ADMIN,
-  email: LEAD_ERRORS.EMAIL_IN_USE_ASK_ADMIN,
 };
 
 export class LeadService implements ILeadService {
   constructor(
     private readonly leadRepository: ILeadRepository,
-    private readonly pipelineRepository: IPipelineRepository,
     private readonly userRepository: IUserRepository,
     private readonly audit: IAuditService,
     private readonly businessCalendar: BusinessCalendar,
@@ -81,20 +62,17 @@ export class LeadService implements ILeadService {
   }
 
   async getLeadFilterOptions(): Promise<LeadFilterOptions> {
-    const [pipelines, sources, assignees] = await Promise.all([
-      this.pipelineRepository.findPipelinesWithStages(),
+    const [sources, assignees] = await Promise.all([
       this.leadRepository.findSourcesInUse(),
       this.userRepository.findActiveUsersForAssignment(),
     ]);
-    return { pipelines, sources, assignees };
+    return { sources, assignees };
   }
 
   async createLead(newLead: CreateLeadInput, loggedUserContext: LoggedUserContext): Promise<LeadOutput> {
-    const stageLocation = await this.findStageLocationOrFail(newLead.stageId);
-    if (newLead.assignedToId) await this.assertAssigneeIsAvailable(newLead.assignedToId);
-    await this.assertContactIsAvailable({ phone: newLead.phone, email: newLead.email }, null, loggedUserContext);
+    await this.assertContactIsAvailable({ phone: newLead.phone, email: newLead.email }, null);
 
-    const createdLead = await this.leadRepository.createLead({
+    const leadCreation = await this.leadRepository.createLead({
       name: newLead.name,
       phone: newLead.phone,
       phoneCountry: this.countryOfPhone(newLead.phone),
@@ -103,16 +81,12 @@ export class LeadService implements ILeadService {
       tags: newLead.tags,
       value: newLead.value,
       enteredOn: this.readEnteredOnOrToday(newLead.enteredOn),
-      pipelineId: stageLocation.pipelineId,
-      stageId: stageLocation.stageId,
       assignedToId: newLead.assignedToId,
     });
+    if (leadCreation.outcome === 'assigneeNotAvailable') throw new BadRequestError(LEAD_ERRORS.ASSIGNEE_NOT_AVAILABLE);
 
-    await this.recordLeadAuditLog(loggedUserContext, 'lead.create', createdLead.id, {
-      name: createdLead.name,
-      phone: createdLead.phone,
-    });
-    return createdLead;
+    await this.recordLeadAuditLog(loggedUserContext, 'lead.create', leadCreation.lead.id, undefined);
+    return leadCreation.lead;
   }
 
   async updateLead(
@@ -124,13 +98,7 @@ export class LeadService implements ILeadService {
     if (updatedFields.length === 0) return { updatedFields };
 
     const effectiveChanges = this.keepOnlyFields(leadChanges, updatedFields);
-    if (effectiveChanges.assignedToId) await this.assertAssigneeIsAvailable(effectiveChanges.assignedToId);
-    await this.assertContactIsAvailable(
-      { phone: effectiveChanges.phone, email: effectiveChanges.email },
-      targetLeadId,
-      loggedUserContext,
-    );
-    const stageLocation = effectiveChanges.stageId ? await this.findStageLocationOrFail(effectiveChanges.stageId) : null;
+    await this.assertContactIsAvailable({ phone: effectiveChanges.phone, email: effectiveChanges.email }, targetLeadId);
 
     const leadData: UpdateLeadData = {
       name: effectiveChanges.name,
@@ -145,45 +113,30 @@ export class LeadService implements ILeadService {
         phoneCountry: this.countryOfPhone(effectiveChanges.phone),
       }),
       ...(effectiveChanges.enteredOn && { enteredOn: this.readEnteredOnOrToday(effectiveChanges.enteredOn) }),
-      ...(stageLocation && { stageId: stageLocation.stageId, pipelineId: stageLocation.pipelineId }),
     };
 
-    await this.leadRepository.updateLead(targetLeadId, leadData);
+    const leadUpdate = await this.leadRepository.updateLead(targetLeadId, leadData);
+    if (leadUpdate === 'leadNotFound') throw new NotFoundError(LEAD_ERRORS.NOT_FOUND);
+    if (leadUpdate === 'assigneeNotAvailable') throw new BadRequestError(LEAD_ERRORS.ASSIGNEE_NOT_AVAILABLE);
     await this.recordLeadAuditLog(loggedUserContext, 'lead.update', targetLeadId, { updatedFields });
     return { updatedFields };
   }
 
   async deleteLead({ targetLeadId }: DeleteLeadRequest, loggedUserContext: LoggedUserContext): Promise<void> {
     this.assertLoggedUserIsAdmin(loggedUserContext);
-    const leadToDelete = await this.findExistingLeadOrFail(targetLeadId);
+    await this.findExistingLeadOrFail(targetLeadId);
 
-    await this.leadRepository.softDeleteLead(targetLeadId, this.clock.now());
-    await this.recordLeadAuditLog(loggedUserContext, 'lead.delete', targetLeadId, {
-      name: leadToDelete.name,
-      phone: leadToDelete.phone,
+    await this.leadRepository.eraseLead({
+      leadId: targetLeadId,
+      deletedAt: this.clock.now(),
+      deletedById: loggedUserContext.loggedUser.id,
     });
+    await this.recordLeadAuditLog(loggedUserContext, 'lead.delete', targetLeadId, undefined);
   }
 
-  async restoreLead({ targetLeadId }: RestoreLeadRequest, loggedUserContext: LoggedUserContext): Promise<void> {
-    this.assertLoggedUserIsAdmin(loggedUserContext);
-    const wasRestored = await this.leadRepository.restoreDeletedLead(targetLeadId);
-    if (!wasRestored) throw new NotFoundError(LEAD_ERRORS.DELETED_LEAD_NOT_FOUND);
-    await this.recordLeadAuditLog(loggedUserContext, 'lead.restore', targetLeadId, undefined);
-  }
-
-  private async assertContactIsAvailable(
-    contact: LeadContact,
-    leadBeingEdited: string | null,
-    { loggedUser }: LoggedUserContext,
-  ): Promise<void> {
-    const holder = await this.leadRepository.findLeadHoldingContact(contact, leadBeingEdited);
-    if (!holder) return;
-    if (!holder.isDeleted) throw new ConflictError(MESSAGE_BY_CONTACT_HELD_BY_ACTIVE_LEAD[holder.heldContact]);
-    if (leadBeingEdited !== null) throw new ConflictError(MESSAGE_ON_EDIT_BY_CONTACT_HELD_BY_DELETED_LEAD[holder.heldContact]);
-    if (loggedUser.role === Role.ADMIN) {
-      throw new DeletedLeadHoldsContactError(MESSAGE_FOR_ADMIN_BY_HELD_CONTACT[holder.heldContact], holder.leadId);
-    }
-    throw new ConflictError(MESSAGE_FOR_SELLER_BY_HELD_CONTACT[holder.heldContact]);
+  private async assertContactIsAvailable(contact: LeadContact, leadBeingEdited: string | null): Promise<void> {
+    const contactInUse = await this.leadRepository.findContactInUse(contact, leadBeingEdited);
+    if (contactInUse) throw new ConflictError(MESSAGE_BY_CONTACT_IN_USE[contactInUse]);
   }
 
   private listFieldsThatChange(existingLead: LeadOutput, leadChanges: UpdateLeadInput): UpdatableLeadField[] {
@@ -192,7 +145,6 @@ export class LeadService implements ILeadService {
       phone: existingLead.phone,
       email: existingLead.email,
       enteredOn: existingLead.enteredOn,
-      stageId: existingLead.stage.id,
       source: existingLead.source,
       tags: existingLead.tags,
       value: existingLead.value,
@@ -213,16 +165,6 @@ export class LeadService implements ILeadService {
     const lead = await this.leadRepository.findLeadById(leadId);
     if (!lead) throw new NotFoundError(LEAD_ERRORS.NOT_FOUND);
     return lead;
-  }
-
-  private async findStageLocationOrFail(stageId: string): Promise<StageLocation> {
-    const stageLocation = await this.pipelineRepository.findStageLocation(stageId);
-    if (!stageLocation) throw new BadRequestError(LEAD_ERRORS.STAGE_NOT_FOUND);
-    return stageLocation;
-  }
-
-  private async assertAssigneeIsAvailable(assigneeId: string): Promise<void> {
-    if (!(await this.userRepository.isActiveUser(assigneeId))) throw new BadRequestError(LEAD_ERRORS.ASSIGNEE_NOT_AVAILABLE);
   }
 
   private assertLoggedUserIsAdmin({ loggedUser }: LoggedUserContext): void {

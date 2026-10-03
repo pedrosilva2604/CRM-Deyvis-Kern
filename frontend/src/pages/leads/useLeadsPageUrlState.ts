@@ -6,7 +6,6 @@ type TextFilterName = Exclude<keyof LeadListFilters, 'page'>;
 
 const URL_PARAM_BY_FILTER: Record<keyof LeadListFilters, string> = {
   search: 'busca',
-  stageId: 'etapa',
   source: 'origem',
   assignment: 'responsavel',
   contactStatus: 'qualidade',
@@ -33,7 +32,6 @@ export function useLeadsPageUrlState() {
 
   const filters: LeadListFilters = {
     search: readText('search'),
-    stageId: readText('stageId'),
     source: readText('source'),
     assignment: readText('assignment'),
     contactStatus: isLeadContactStatus(rawContactStatus) ? rawContactStatus : '',
@@ -41,7 +39,7 @@ export function useLeadsPageUrlState() {
   };
 
   const hasActiveFilters = Boolean(
-    filters.search || filters.stageId || filters.source || filters.assignment || filters.contactStatus,
+    filters.search || filters.source || filters.assignment || filters.contactStatus,
   );
 
   function updateFilters(filterChanges: Partial<LeadListFilters>) {

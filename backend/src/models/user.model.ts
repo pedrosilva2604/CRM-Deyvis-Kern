@@ -43,6 +43,11 @@ export interface UpdateUserPasswordRequest {
   data: UpdateUserPasswordInput;
 }
 
+export interface RestoreUserRequest {
+  targetUserId: string;
+  data: UpdateUserPasswordInput;
+}
+
 export interface DeleteUserRequest {
   targetUserId: string;
 }

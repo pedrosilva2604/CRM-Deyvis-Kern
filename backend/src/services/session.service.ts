@@ -11,7 +11,7 @@ import type { ITokenService } from './token.service';
 const HOUR_MS = 60 * 60 * 1000;
 
 export interface ISessionService {
-  startSession(userId: string, requestOrigin: RequestOrigin): Promise<IssuedSession>;
+  startSession(userId: string, verifiedPasswordHash: string, requestOrigin: RequestOrigin): Promise<IssuedSession>;
   validateSession(token: string): Promise<AuthUser>;
   endSession(sessionId: string): Promise<void>;
   notifyAllUserSessionsEnded(userId: string): void;
@@ -26,9 +26,16 @@ export class SessionService implements ISessionService {
     private readonly sessionTerminationNotifier: ISessionTerminationNotifier,
   ) {}
 
-  async startSession(userId: string, requestOrigin: RequestOrigin): Promise<IssuedSession> {
+  async startSession(userId: string, verifiedPasswordHash: string, requestOrigin: RequestOrigin): Promise<IssuedSession> {
     const expiresAt = this.calculateSessionExpiration();
-    const session = await this.sessions.createSession({ userId, expiresAt, ip: requestOrigin.ip, userAgent: requestOrigin.userAgent });
+    const session = await this.sessions.createSessionIfCredentialsUnchanged({
+      userId,
+      verifiedPasswordHash,
+      expiresAt,
+      ip: requestOrigin.ip,
+      userAgent: requestOrigin.userAgent,
+    });
+    if (!session) throw new UnauthorizedError(AUTH_ERRORS.INVALID_CREDENTIALS);
     const token = this.tokens.signSessionToken({ sid: session.id }, expiresAt);
     return { token, expiresAt };
   }

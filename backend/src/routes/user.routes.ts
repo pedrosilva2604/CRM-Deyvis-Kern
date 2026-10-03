@@ -42,6 +42,12 @@ export class UserRoutes {
       this.validate.validateBody(updateUserPasswordSchema),
       this.users.updateUserPassword,
     );
+    this.router.post(
+      '/:id/restore',
+      this.validate.validateParams(userIdParamsSchema),
+      this.validate.validateBody(updateUserPasswordSchema),
+      this.users.restoreUser,
+    );
     this.router.delete('/:id', this.validate.validateParams(userIdParamsSchema), this.users.deleteUser);
   }
 }

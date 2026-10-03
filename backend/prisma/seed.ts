@@ -1,5 +1,6 @@
 import { PrismaClient, Role } from '@prisma/client';
 import { z } from 'zod';
+import { DEFAULT_PIPELINE_STAGES, defaultPipelineNameFor } from '../src/constants/default-pipeline';
 import { Argon2PasswordHasher } from '../src/infra/password-hasher';
 
 const seedEnvSchema = z.object({
@@ -10,17 +11,6 @@ const seedEnvSchema = z.object({
   ARGON2_ITERATIONS: z.coerce.number().int().min(2),
   ARGON2_PARALLELISM: z.coerce.number().int().min(1).max(16),
 });
-
-const defaultPipeline = {
-  name: 'Funil de Vendas',
-  stages: [
-    { name: 'Novo lead', color: '#3b82f6', position: 0 },
-    { name: 'Em atendimento', color: '#f59e0b', position: 1 },
-    { name: 'Proposta', color: '#8b5cf6', position: 2 },
-    { name: 'Ganho', color: '#22c55e', position: 3, isWon: true },
-    { name: 'Perdido', color: '#ef4444', position: 4, isLost: true },
-  ],
-};
 
 const prisma = new PrismaClient();
 
@@ -39,24 +29,24 @@ async function seedAdmin(seedEnv: z.infer<typeof seedEnvSchema>) {
     parallelism: seedEnv.ARGON2_PARALLELISM,
   });
   const passwordHash = await hasher.hashPassword(seedEnv.SEED_ADMIN_PASSWORD);
-  await prisma.user.upsert({
+  return await prisma.user.upsert({
     where: { email: seedEnv.SEED_ADMIN_EMAIL },
     update: {},
     create: { name: seedEnv.SEED_ADMIN_NAME, email: seedEnv.SEED_ADMIN_EMAIL, role: Role.ADMIN, passwordHash },
   });
 }
 
-async function seedDefaultPipeline() {
-  if ((await prisma.pipeline.count()) > 0) return;
+async function seedPipelineOf(owner: { id: string; name: string }) {
+  if ((await prisma.pipeline.count({ where: { ownerId: owner.id } })) > 0) return;
   await prisma.pipeline.create({
-    data: { name: defaultPipeline.name, stages: { create: defaultPipeline.stages } },
+    data: { name: defaultPipelineNameFor(owner.name), ownerId: owner.id, stages: { create: DEFAULT_PIPELINE_STAGES } },
   });
 }
 
 async function main() {
   const seedEnv = readSeedEnv();
-  await seedAdmin(seedEnv);
-  await seedDefaultPipeline();
+  const admin = await seedAdmin(seedEnv);
+  await seedPipelineOf(admin);
   console.log('Seed concluído.');
 }
 

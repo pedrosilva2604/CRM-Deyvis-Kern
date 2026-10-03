@@ -62,9 +62,6 @@ export function LeadListFiltersBar({
     if (filters.search !== settledSearch) setTypedSearch(filters.search);
   }, [filters.search]);
 
-  const stageOptions = (filterOptions?.pipelines ?? []).flatMap((pipeline) =>
-    pipeline.stages.map((stage) => ({ value: stage.id, label: stage.name })),
-  );
   const sourceOptions = (filterOptions?.sources ?? []).map((source) => ({ value: source, label: source }));
   const assignmentOptions = [
     { value: UNASSIGNED_LEADS_FILTER, label: 'Sem responsável' },
@@ -93,13 +90,6 @@ export function LeadListFiltersBar({
           className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-900 dark:placeholder:text-slate-500 dark:focus:ring-indigo-900/40"
         />
       </div>
-      <CompactSelect
-        label="Filtrar por etapa"
-        allOptionsLabel="Todas as etapas"
-        options={stageOptions}
-        value={filters.stageId}
-        onValueChange={(stageId) => onFiltersChange({ stageId })}
-      />
       <CompactSelect
         label="Filtrar por origem"
         allOptionsLabel="Todas as origens"

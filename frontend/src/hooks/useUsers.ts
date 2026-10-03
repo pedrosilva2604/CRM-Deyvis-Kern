@@ -51,6 +51,10 @@ export function useChangeUserPassword() {
   );
 }
 
+export function useRestoreUser() {
+  return useUsersMutation(({ userId, newPassword }: UserPasswordChange) => usersApi.restoreUser(userId, newPassword));
+}
+
 export function useDeleteUser() {
   return useUsersMutation((userId: string) => usersApi.deleteUser(userId));
 }

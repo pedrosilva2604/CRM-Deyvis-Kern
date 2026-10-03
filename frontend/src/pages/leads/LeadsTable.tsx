@@ -6,7 +6,6 @@ import { formatCurrencyInReais, formatTimeAgo } from '@/lib/formatters';
 import { describeCountry, formatPhoneForDisplay, isHomeCountry } from '@crm/shared';
 import type { LeadListItem } from '@/types/lead';
 import { CONTACT_STATUS_LABELS } from '@/types/lead';
-import { LeadStageLabel } from './LeadStageLabel';
 
 interface LeadsTableProps {
   leads: LeadListItem[];
@@ -21,7 +20,6 @@ export function LeadsTable({ leads, isRefreshing, onOpenLeadDetails }: LeadsTabl
         <thead className="border-b border-slate-200 bg-slate-50 text-xs font-medium uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-400">
           <tr>
             <th scope="col" className="px-5 py-3">Lead</th>
-            <th scope="col" className="px-5 py-3">Etapa</th>
             <th scope="col" className="px-5 py-3">Origem</th>
             <th scope="col" className="px-5 py-3">Responsável</th>
             <th scope="col" className="px-5 py-3">Valor</th>
@@ -55,9 +53,6 @@ export function LeadsTable({ leads, isRefreshing, onOpenLeadDetails }: LeadsTabl
                     {!isHomeCountry(lead.phoneCountry) && <Badge tone="accent">{describeCountry(lead.phoneCountry)}</Badge>}
                   </span>
                 </button>
-              </td>
-              <td className="px-5 py-3">
-                <LeadStageLabel stage={lead.stage} />
               </td>
               <td className="px-5 py-3 text-slate-600 dark:text-slate-300">{lead.source ?? '—'}</td>
               <td className="px-5 py-3">

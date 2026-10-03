@@ -24,12 +24,20 @@ function RunningImport({ description }: { description: string }) {
   );
 }
 
-function describeCompletedImport({ importedLeads, skippedExistingLeads, restoredLeads, skippedDeletedLeads }: LeadImportProgress) {
+function describeCompletedImport({
+  importedLeads,
+  skippedExistingLeads,
+  importsIntoPipeline,
+  addedToPipelineLeads,
+  alreadyInPipelineLeads,
+}: LeadImportProgress) {
   const sentences = [`${formatInteger(importedLeads)} leads importados.`];
-  if (restoredLeads > 0) sentences.push(`${formatInteger(restoredLeads)} que estavam excluídos foram restaurados.`);
-  if (skippedExistingLeads > 0) sentences.push(`${formatInteger(skippedExistingLeads)} já existiam no CRM e foram ignorados.`);
-  if (skippedDeletedLeads > 0) {
-    sentences.push(`${formatInteger(skippedDeletedLeads)} pertencem a leads excluídos: peça a um administrador para restaurá-los.`);
+  if (skippedExistingLeads > 0) sentences.push(`${formatInteger(skippedExistingLeads)} já existiam no CRM e não foram duplicados.`);
+  if (importsIntoPipeline) {
+    sentences.push(`${formatInteger(addedToPipelineLeads)} entraram no funil.`);
+    if (alreadyInPipelineLeads > 0) {
+      sentences.push(`${formatInteger(alreadyInPipelineLeads)} já estavam no funil e continuaram onde estavam.`);
+    }
   }
   return sentences.join(' ');
 }

@@ -4,8 +4,8 @@ import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { SelectField } from '@/components/ui/SelectField';
 import { TextField } from '@/components/ui/TextField';
-import { useCreateUser, useUpdateUser } from '@/hooks/useUsers';
-import { api, apiErrorMessage, apiFieldErrors, type FieldErrors } from '@/lib/api';
+import { useCreateUser, useRestoreUser, useUpdateUser } from '@/hooks/useUsers';
+import { api, apiErrorMessage, apiFieldErrors, apiResponseField, type FieldErrors } from '@/lib/api';
 import { useAuth, type Role, type Session } from '@/stores/auth';
 import { ROLE_LABELS, type ManagedUser, type UpdateUserPayload } from '@/types/user';
 
@@ -41,6 +41,7 @@ export function UserFormDialog({ user, isSelf = false, onClose, onSaved }: UserF
   const setSession = useAuth((state) => state.setSession);
   const createUser = useCreateUser();
   const updateUser = useUpdateUser();
+  const restoreUser = useRestoreUser();
   const [values, setValues] = useState<UserFormValues>({
     name: user?.name ?? '',
     email: user?.email ?? '',
@@ -49,7 +50,8 @@ export function UserFormDialog({ user, isSelf = false, onClose, onSaved }: UserF
   const [password, setPassword] = useState('');
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [error, setError] = useState('');
-  const saving = createUser.isPending || updateUser.isPending;
+  const [deletedUserIdHoldingEmail, setDeletedUserIdHoldingEmail] = useState<string | null>(null);
+  const saving = createUser.isPending || updateUser.isPending || restoreUser.isPending;
 
   function updateValue<K extends keyof UserFormValues>(field: K, value: UserFormValues[K]) {
     setValues((current) => ({ ...current, [field]: value }));
@@ -73,17 +75,34 @@ export function UserFormDialog({ user, isSelf = false, onClose, onSaved }: UserF
     onSaved(`${values.name.trim()} foi cadastrado como ${ROLE_LABELS[values.role].toLowerCase()}.`);
   }
 
+  function showFailure(err: unknown) {
+    const errors = apiFieldErrors(err);
+    setFieldErrors(errors);
+    if (Object.keys(errors).length === 0) setError(apiErrorMessage(err, 'Não foi possível salvar o usuário.'));
+  }
+
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setError('');
     setFieldErrors({});
+    setDeletedUserIdHoldingEmail(null);
     try {
       if (isEditing) await saveChanges(user);
       else await createNewUser();
     } catch (err) {
-      const errors = apiFieldErrors(err);
-      setFieldErrors(errors);
-      if (Object.keys(errors).length === 0) setError(apiErrorMessage(err, 'Não foi possível salvar o usuário.'));
+      showFailure(err);
+      if (!isEditing) setDeletedUserIdHoldingEmail(apiResponseField(err, 'deletedUserId'));
+    }
+  }
+
+  async function restoreDeletedUser(deletedUserId: string) {
+    setError('');
+    setFieldErrors({});
+    try {
+      await restoreUser.mutateAsync({ userId: deletedUserId, newPassword: password });
+      onSaved('O usuário foi restaurado com o histórico dele e já pode entrar com a senha definida aqui.');
+    } catch (err) {
+      showFailure(err);
     }
   }
 
@@ -95,6 +114,14 @@ export function UserFormDialog({ user, isSelf = false, onClose, onSaved }: UserF
     >
       <form onSubmit={handleSubmit} className="space-y-4" noValidate>
         {error && <Alert variant="error">{error}</Alert>}
+        {deletedUserIdHoldingEmail && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 p-3 text-sm text-slate-600 dark:border-slate-800 dark:text-slate-300">
+            <span>Ele volta com o nome e o perfil que tinha, e entra com a senha digitada abaixo.</span>
+            <Button type="button" variant="secondary" loading={restoreUser.isPending} onClick={() => restoreDeletedUser(deletedUserIdHoldingEmail)}>
+              Restaurar usuário
+            </Button>
+          </div>
+        )}
 
         <TextField
           label="Nome"

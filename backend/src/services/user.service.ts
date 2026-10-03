@@ -1,5 +1,5 @@
 import { Role } from '@prisma/client';
-import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from '@/errors/app-errors';
+import { BadRequestError, ConflictError, DeletedUserHoldsEmailError, ForbiddenError, NotFoundError } from '@/errors/app-errors';
 import { AUTH_ERRORS, USER_ERRORS } from '@/errors/errors.constants';
 import type { AuditLogInput } from '@/models/audit.model';
 import type { LoggedUserContext } from '@/models/common.model';
@@ -9,12 +9,14 @@ import type {
   DeleteUserRequest,
   RegisteredUserOutput,
   RegisterUserInput,
+  RestoreUserRequest,
   UpdateUserInput,
   UpdateUserPasswordRequest,
   UpdateUserRequest,
 } from '@/models/user.model';
 import type { IUserRepository } from '@/repositories/user.repository';
 import type { IAuditService } from './audit.service';
+import type { Clock } from '@/infra/clock';
 import type { IPasswordHasher } from '@/infra/password-hasher';
 import type { ISessionService } from './session.service';
 
@@ -26,6 +28,7 @@ export interface IUserService {
   deactivateUser(request: DeactivateUserRequest, loggedUserContext: LoggedUserContext): Promise<RegisteredUserOutput>;
   updateUserPassword(request: UpdateUserPasswordRequest, loggedUserContext: LoggedUserContext): Promise<void>;
   deleteUser(request: DeleteUserRequest, loggedUserContext: LoggedUserContext): Promise<void>;
+  restoreUser(request: RestoreUserRequest, loggedUserContext: LoggedUserContext): Promise<void>;
 }
 
 export interface IUserPasswordUpdater {
@@ -38,11 +41,12 @@ export class UserService implements IUserService, IUserPasswordUpdater {
     private readonly hasher: IPasswordHasher,
     private readonly sessions: ISessionService,
     private readonly audit: IAuditService,
+    private readonly clock: Clock,
   ) {}
 
   async registerUser(newUserRegistration: RegisterUserInput, loggedUserContext: LoggedUserContext): Promise<RegisteredUserOutput> {
     this.assertLoggedUserIsAdmin(loggedUserContext);
-    await this.assertEmailIsAvailable(newUserRegistration.email);
+    await this.assertEmailIsAvailable(newUserRegistration.email, USER_ERRORS.EMAIL_OF_DELETED_USER);
 
     const registeredUser = await this.createUser(newUserRegistration);
     await this.recordUserAuditLog(loggedUserContext, 'user.create', registeredUser.id, {
@@ -64,7 +68,7 @@ export class UserService implements IUserService, IUserPasswordUpdater {
   ): Promise<RegisteredUserOutput> {
     this.assertLoggedUserIsAdmin(loggedUserContext);
     const targetUser = await this.findExistingUserOrFail(targetUserId);
-    if (this.isChangingEmail(targetUser, data)) await this.assertEmailIsAvailable(data.email);
+    if (this.isChangingEmail(targetUser, data)) await this.assertEmailIsAvailable(data.email, USER_ERRORS.EMAIL_OF_DELETED_USER_ON_EDIT);
     if (this.isLosingAdminRole(targetUser, data)) this.assertIsNotSelf(targetUser, loggedUserContext);
 
     const updated = await this.userRepository.updateUserKeepingAnActiveAdmin(targetUserId, data);
@@ -78,6 +82,7 @@ export class UserService implements IUserService, IUserPasswordUpdater {
     await this.findExistingUserOrFail(targetUserId);
 
     const activated = await this.userRepository.activateUser(targetUserId);
+    if (!activated) throw new NotFoundError(USER_ERRORS.NOT_FOUND);
     await this.recordUserAuditLog(loggedUserContext, 'user.activate', targetUserId, undefined);
     return activated;
   }
@@ -120,14 +125,28 @@ export class UserService implements IUserService, IUserPasswordUpdater {
     const targetUser = await this.findExistingUserOrFail(targetUserId);
     this.assertIsNotSelf(targetUser, loggedUserContext);
 
-    const wasDeleted = await this.userRepository.deleteUserKeepingAnActiveAdmin(targetUserId);
-    if (!wasDeleted) throw new BadRequestError(USER_ERRORS.LAST_ADMIN);
+    const userDeletion = await this.userRepository.deleteUserKeepingAnActiveAdmin(
+      targetUserId,
+      loggedUserContext.loggedUser.id,
+      this.clock.now(),
+    );
+    if (userDeletion === 'lastAdmin') throw new BadRequestError(USER_ERRORS.LAST_ADMIN);
+    if (userDeletion === 'actorNotAdmin') throw new ForbiddenError(AUTH_ERRORS.ACCESS_DENIED);
     this.sessions.notifyAllUserSessionsEnded(targetUserId);
     await this.recordUserAuditLog(loggedUserContext, 'user.delete', targetUserId, {
       name: targetUser.name,
       email: targetUser.email,
       role: targetUser.role,
     });
+  }
+
+  async restoreUser({ targetUserId, data }: RestoreUserRequest, loggedUserContext: LoggedUserContext): Promise<void> {
+    this.assertLoggedUserIsAdmin(loggedUserContext);
+    const passwordHash = await this.hasher.hashPassword(data.password);
+
+    const wasRestored = await this.userRepository.restoreDeletedUser(targetUserId, passwordHash);
+    if (!wasRestored) throw new NotFoundError(USER_ERRORS.DELETED_USER_NOT_FOUND);
+    await this.recordUserAuditLog(loggedUserContext, 'user.restore', targetUserId, undefined);
   }
 
   private assertLoggedUserIsAdmin({ loggedUser }: LoggedUserContext): void {
@@ -145,9 +164,11 @@ export class UserService implements IUserService, IUserPasswordUpdater {
     return targetUser;
   }
 
-  private async assertEmailIsAvailable(email: string): Promise<void> {
+  private async assertEmailIsAvailable(email: string, deletedUserMessage: string): Promise<void> {
     const existing = await this.userRepository.findUserByEmail(email);
     if (existing) throw new ConflictError(USER_ERRORS.EMAIL_IN_USE);
+    const deletedUserId = await this.userRepository.findDeletedUserIdByEmail(email);
+    if (deletedUserId) throw new DeletedUserHoldsEmailError(deletedUserMessage, deletedUserId);
   }
 
   private assertIsNotSelf(targetUser: RegisteredUserOutput, { loggedUser }: LoggedUserContext): void {

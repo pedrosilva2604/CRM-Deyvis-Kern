@@ -1,4 +1,5 @@
 import { Role, type Theme } from '@prisma/client';
+import { DEFAULT_PIPELINE_STAGES, defaultPipelineNameFor } from '@/constants/default-pipeline';
 import type { LeadPersonOutput } from '@/models/lead.model';
 import {
   toRegisteredUserOutput,
@@ -18,14 +19,23 @@ export interface IUserRepository {
   findUserById(id: string): Promise<RegisteredUserOutput | null>;
   findUserByEmail(email: string): Promise<RegisteredUserOutput | null>;
   findUserCredentialsByEmail(email: string): Promise<UserCredentials | null>;
+  findDeletedUserIdByEmail(email: string): Promise<string | null>;
+  restoreDeletedUser(id: string, passwordHash: string): Promise<boolean>;
   findActiveUsersForAssignment(): Promise<LeadPersonOutput[]>;
-  isActiveUser(id: string): Promise<boolean>;
   updateUserKeepingAnActiveAdmin(id: string, data: UpdateUserData): Promise<RegisteredUserOutput | null>;
   updateUserTheme(id: string, theme: Theme): Promise<UserOutput>;
-  activateUser(id: string): Promise<RegisteredUserOutput>;
+  activateUser(id: string): Promise<RegisteredUserOutput | null>;
   deactivateUserKeepingAnActiveAdmin(id: string): Promise<RegisteredUserOutput | null>;
-  deleteUserKeepingAnActiveAdmin(id: string): Promise<boolean>;
+  deleteUserKeepingAnActiveAdmin(id: string, newPipelineOwnerId: string, deletedAt: Date): Promise<UserDeletionOutcome>;
   replaceUserPassword(id: string, passwordHash: string, resetTokenToConsume: string | null): Promise<boolean>;
+}
+
+const notDeletedUsers = { deletedAt: null };
+
+export type UserDeletionOutcome = 'deleted' | 'lastAdmin' | 'actorNotAdmin';
+
+function leavesNoActiveAdmin(activeAdminIds: string[], userId: string): boolean {
+  return activeAdminIds.includes(userId) && activeAdminIds.length <= 1;
 }
 
 function isRemovingAdminRole(data: UpdateUserData): boolean {
@@ -36,40 +46,58 @@ export class UserRepository implements IUserRepository {
   constructor(private readonly prisma: DatabaseClient) {}
 
   async createUser(data: CreateUserData): Promise<RegisteredUserOutput> {
-    const user = await this.prisma.user.create({ data });
+    const user = await this.prisma.user.create({
+      data: {
+        ...data,
+        ownedPipelines: { create: { name: defaultPipelineNameFor(data.name), stages: { create: DEFAULT_PIPELINE_STAGES } } },
+      },
+    });
     return toRegisteredUserOutput(user);
   }
 
   async findAllUsers(): Promise<RegisteredUserOutput[]> {
-    const users = await this.prisma.user.findMany({ orderBy: { name: 'asc' } });
+    const users = await this.prisma.user.findMany({ where: notDeletedUsers, orderBy: { name: 'asc' } });
     return users.map(toRegisteredUserOutput);
   }
 
   async findUserById(id: string): Promise<RegisteredUserOutput | null> {
-    const user = await this.prisma.user.findUnique({ where: { id } });
+    const user = await this.prisma.user.findFirst({ where: { id, ...notDeletedUsers } });
     return user ? toRegisteredUserOutput(user) : null;
   }
 
   async findUserByEmail(email: string): Promise<RegisteredUserOutput | null> {
-    const user = await this.prisma.user.findUnique({ where: { email } });
+    const user = await this.prisma.user.findFirst({ where: { email, ...notDeletedUsers } });
     return user ? toRegisteredUserOutput(user) : null;
   }
 
   async findUserCredentialsByEmail(email: string): Promise<UserCredentials | null> {
-    const user = await this.prisma.user.findUnique({ where: { email } });
+    const user = await this.prisma.user.findFirst({ where: { email, ...notDeletedUsers } });
     return user ? toUserCredentials(user) : null;
+  }
+
+  async findDeletedUserIdByEmail(email: string): Promise<string | null> {
+    const deletedUser = await this.prisma.user.findFirst({ where: { email, deletedAt: { not: null } }, select: { id: true } });
+    return deletedUser?.id ?? null;
+  }
+
+  async restoreDeletedUser(id: string, passwordHash: string): Promise<boolean> {
+    return await this.prisma.$transaction(async (transaction) => {
+      const restoration = await transaction.user.updateMany({
+        where: { id, deletedAt: { not: null } },
+        data: { deletedAt: null, active: true, passwordHash },
+      });
+      if (restoration.count === 0) return false;
+      await this.giveDefaultPipelineIfMissing(transaction, id);
+      return true;
+    });
   }
 
   async findActiveUsersForAssignment(): Promise<LeadPersonOutput[]> {
     return await this.prisma.user.findMany({
-      where: { active: true },
+      where: { active: true, ...notDeletedUsers },
       orderBy: { name: 'asc' },
       select: { id: true, name: true },
     });
-  }
-
-  async isActiveUser(id: string): Promise<boolean> {
-    return (await this.prisma.user.count({ where: { id, active: true } })) > 0;
   }
 
   async updateUserKeepingAnActiveAdmin(id: string, data: UpdateUserData): Promise<RegisteredUserOutput | null> {
@@ -85,9 +113,9 @@ export class UserRepository implements IUserRepository {
     return toUserOutput(user);
   }
 
-  async activateUser(id: string): Promise<RegisteredUserOutput> {
-    const user = await this.prisma.user.update({ where: { id }, data: { active: true } });
-    return toRegisteredUserOutput(user);
+  async activateUser(id: string): Promise<RegisteredUserOutput | null> {
+    const activation = await this.prisma.user.updateMany({ where: { id, ...notDeletedUsers }, data: { active: true } });
+    return activation.count === 1 ? await this.findUserById(id) : null;
   }
 
   async deactivateUserKeepingAnActiveAdmin(id: string): Promise<RegisteredUserOutput | null> {
@@ -99,11 +127,18 @@ export class UserRepository implements IUserRepository {
     });
   }
 
-  async deleteUserKeepingAnActiveAdmin(id: string): Promise<boolean> {
+  async deleteUserKeepingAnActiveAdmin(id: string, newPipelineOwnerId: string, deletedAt: Date): Promise<UserDeletionOutcome> {
     return await this.prisma.$transaction(async (transaction) => {
-      if (await this.wouldLeaveNoActiveAdmin(transaction, id)) return false;
-      await transaction.user.delete({ where: { id } });
-      return true;
+      const activeAdminIds = await this.lockActiveAdminIds(transaction);
+      if (leavesNoActiveAdmin(activeAdminIds, id)) return 'lastAdmin';
+      if (!activeAdminIds.includes(newPipelineOwnerId)) return 'actorNotAdmin';
+      await this.lockUser(transaction, id);
+      await transaction.pipeline.updateMany({ where: { ownerId: id }, data: { ownerId: newPipelineOwnerId } });
+      await transaction.pipelineMember.deleteMany({ where: { userId: id } });
+      await transaction.lead.updateMany({ where: { assignedToId: id }, data: { assignedToId: null } });
+      await transaction.user.update({ where: { id }, data: { active: false, deletedAt } });
+      await this.revokeAllSessionsOf(transaction, id);
+      return 'deleted';
     });
   }
 
@@ -123,10 +158,25 @@ export class UserRepository implements IUserRepository {
   }
 
   private async wouldLeaveNoActiveAdmin(transaction: DatabaseTransaction, userId: string): Promise<boolean> {
+    return leavesNoActiveAdmin(await this.lockActiveAdminIds(transaction), userId);
+  }
+
+  private async lockActiveAdminIds(transaction: DatabaseTransaction): Promise<string[]> {
     const lockedActiveAdmins = await transaction.$queryRaw<{ id: string }[]>`
-      SELECT "id" FROM "User" WHERE "role" = 'ADMIN' AND "active" = true FOR UPDATE`;
-    const isTargetAnActiveAdmin = lockedActiveAdmins.some((activeAdmin) => activeAdmin.id === userId);
-    return isTargetAnActiveAdmin && lockedActiveAdmins.length <= 1;
+      SELECT "id" FROM "User" WHERE "role" = 'ADMIN' AND "active" = true AND "deletedAt" IS NULL ORDER BY "id" FOR UPDATE`;
+    return lockedActiveAdmins.map((activeAdmin) => activeAdmin.id);
+  }
+
+  private async lockUser(transaction: DatabaseTransaction, userId: string): Promise<void> {
+    await transaction.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${userId}::uuid FOR UPDATE`;
+  }
+
+  private async giveDefaultPipelineIfMissing(transaction: DatabaseTransaction, userId: string): Promise<void> {
+    if ((await transaction.pipeline.count({ where: { ownerId: userId } })) > 0) return;
+    const { name } = await transaction.user.findUniqueOrThrow({ where: { id: userId }, select: { name: true } });
+    await transaction.pipeline.create({
+      data: { name: defaultPipelineNameFor(name), ownerId: userId, stages: { create: DEFAULT_PIPELINE_STAGES } },
+    });
   }
 
   private async revokeAllSessionsOf(transaction: DatabaseTransaction, userId: string): Promise<void> {

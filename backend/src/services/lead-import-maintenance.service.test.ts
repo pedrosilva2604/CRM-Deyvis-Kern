@@ -3,6 +3,7 @@ import { FixedClock } from '@/testing/fixed-clock';
 import { InMemoryLeadImportQueue } from '@/testing/in-memory-lead-import.queue';
 import { InMemoryLeadImportRepository } from '@/testing/in-memory-lead-import.repository';
 import { RecordingLeadImportNotifications } from '@/testing/recording-lead-import-notifications';
+import { RecordingPipelineChangeAnnouncer } from '@/testing/recording-pipeline-change-announcer';
 import { RecordingRealtimePublisher } from '@/testing/recording-realtime-publisher';
 import { LeadImportMaintenanceService } from './lead-import-maintenance.service';
 import { LeadImportProcessingService } from './lead-import-processing.service';
@@ -13,7 +14,7 @@ function createMaintenanceScenario() {
   const leadImports = new InMemoryLeadImportRepository();
   const leadImportQueue = new InMemoryLeadImportQueue();
   const notifications = new RecordingLeadImportNotifications();
-  const processing = new LeadImportProcessingService(leadImports, notifications, new RecordingRealtimePublisher(), clock, {
+  const processing = new LeadImportProcessingService(leadImports, notifications, new RecordingRealtimePublisher(), new RecordingPipelineChangeAnnouncer(), clock, {
     chunkSize: 500,
   });
   const maintenance = new LeadImportMaintenanceService(leadImports, leadImportQueue, processing, notifications, clock, {

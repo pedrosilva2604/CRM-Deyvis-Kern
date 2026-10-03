@@ -6,13 +6,14 @@ export const REALTIME_EVENTS_CHANNEL = 'crm:realtime-events';
 export const REALTIME_EVENTS = {
   LEAD_IMPORT_PROGRESS: 'lead-import:progress',
   NOTIFICATION_CREATED: 'notification:created',
+  PIPELINE_CHANGED: 'pipeline:changed',
 } as const;
 
 export type RealtimeEventName = (typeof REALTIME_EVENTS)[keyof typeof REALTIME_EVENTS];
 
 const realtimeEventSchema = z.object({
   userId: z.string().uuid(),
-  eventName: z.enum([REALTIME_EVENTS.LEAD_IMPORT_PROGRESS, REALTIME_EVENTS.NOTIFICATION_CREATED]),
+  eventName: z.enum([REALTIME_EVENTS.LEAD_IMPORT_PROGRESS, REALTIME_EVENTS.NOTIFICATION_CREATED, REALTIME_EVENTS.PIPELINE_CHANGED]),
   payload: z.record(z.unknown()),
 });
 

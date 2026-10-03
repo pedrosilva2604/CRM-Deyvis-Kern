@@ -19,7 +19,6 @@ const CSV_CONTENT_TYPE = 'text/csv; charset=utf-8';
 function buildLeadListQueryParams(filters: LeadListFilters) {
   const queryParams: Record<string, string | number> = { page: filters.page, pageSize: LEADS_PAGE_SIZE };
   if (filters.search.trim()) queryParams.search = filters.search.trim();
-  if (filters.stageId) queryParams.stageId = filters.stageId;
   if (filters.source) queryParams.source = filters.source;
   if (filters.assignment) queryParams.assignment = filters.assignment;
   if (filters.contactStatus) queryParams.contactStatus = filters.contactStatus;

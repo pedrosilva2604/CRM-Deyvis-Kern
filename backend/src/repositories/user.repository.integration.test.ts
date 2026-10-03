@@ -2,6 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { ConflictError } from '@/errors/app-errors';
 import { USER_ERRORS } from '@/errors/errors.constants';
 import { ORIGINAL_PASSWORD_HASH, TestDatabase } from '@/testing/integration/test-database';
+import { PrismaSessionRepository } from './session.repository';
 import { UserRepository } from './user.repository';
 
 const database = new TestDatabase();
@@ -34,7 +35,7 @@ describe('Sempre sobra um administrador ativo', () => {
   it('não exclui o último admin ativo', async () => {
     const ana = await database.addUser('Ana', { role: 'ADMIN' });
 
-    expect(await users.deleteUserKeepingAnActiveAdmin(ana)).toBe(false);
+    expect(await users.deleteUserKeepingAnActiveAdmin(ana, ana, new Date())).toBe('lastAdmin');
     expect(await database.countActiveAdmins()).toBe(1);
   });
 
@@ -73,6 +74,119 @@ describe('Sempre sobra um administrador ativo', () => {
 
     expect(await database.findUser(bruno)).toMatchObject({ active: false });
     expect(await database.countOpenSessionsOf(bruno)).toBe(0);
+  });
+});
+
+describe('Excluir um usuário guarda o histórico', () => {
+  it('o usuário continua no banco, sem acesso, e o cartão continua dizendo quem o adicionou', async () => {
+    const ana = await database.addUser('Ana', { role: 'ADMIN' });
+    const joao = await database.addUser('João');
+    const emailOfJoao = (await database.findUser(joao)).email;
+    const funnelOfAna = await database.addPipeline(ana, ['Novo lead']);
+    await database.addMember(funnelOfAna.pipelineId, joao);
+    const leadOfJoao = await database.addLead({ name: 'Cliente', phone: '+5511900000001' });
+    const cardAddedByJoao = await database.addCard(funnelOfAna.pipelineId, funnelOfAna.stageIdByName['Novo lead']!, leadOfJoao, 1024, joao);
+    await database.addOpenSession(joao);
+    const deletedAt = new Date('2026-10-02T15:00:00.000Z');
+
+    expect(await users.deleteUserKeepingAnActiveAdmin(joao, ana, deletedAt)).toBe('deleted');
+
+    expect(await database.findUser(joao)).toMatchObject({ active: false, deletedAt });
+    expect(await database.findCard(cardAddedByJoao)).toMatchObject({ addedById: joao });
+    expect(await database.client.pipelineMember.count({ where: { userId: joao } })).toBe(0);
+    expect(await database.countOpenSessionsOf(joao)).toBe(0);
+    expect((await users.findAllUsers()).map((user) => user.id)).not.toContain(joao);
+    expect(await users.findUserById(joao)).toBeNull();
+    expect(await users.findUserCredentialsByEmail(emailOfJoao)).toBeNull();
+  });
+
+  it('o e-mail de quem foi excluído continua reservado', async () => {
+    const ana = await database.addUser('Ana', { role: 'ADMIN' });
+    const joao = await database.addUser('João');
+    const emailOfJoao = (await database.findUser(joao)).email;
+    await users.deleteUserKeepingAnActiveAdmin(joao, ana, new Date());
+
+    const reuse = users.createUser({ name: 'Outro João', email: emailOfJoao, passwordHash: 'x', role: 'AGENT' });
+
+    await expect(reuse).rejects.toBeInstanceOf(ConflictError);
+    await expect(reuse).rejects.toThrow(USER_ERRORS.EMAIL_IN_USE);
+  });
+});
+
+describe('Ativar, excluir e entrar enquanto outra coisa acontece', () => {
+  it('ativar um usuário que acabou de ser excluído não o traz de volta', async () => {
+    const ana = await database.addUser('Ana', { role: 'ADMIN' });
+    const joao = await database.addUser('João', { active: false });
+    await users.deleteUserKeepingAnActiveAdmin(joao, ana, new Date());
+
+    expect(await users.activateUser(joao)).toBeNull();
+    expect(await database.findUser(joao)).toMatchObject({ active: false });
+  });
+
+  it('um admin que já foi excluído não consegue excluir ninguém nem receber funis', async () => {
+    const ana = await database.addUser('Ana', { role: 'ADMIN' });
+    const bruno = await database.addUser('Bruno', { role: 'ADMIN' });
+    await database.addUser('Carla', { role: 'ADMIN' });
+    await users.deleteUserKeepingAnActiveAdmin(bruno, ana, new Date());
+
+    expect(await users.deleteUserKeepingAnActiveAdmin(ana, bruno, new Date())).toBe('actorNotAdmin');
+    expect(await database.findUser(ana)).toMatchObject({ active: true, deletedAt: null });
+  });
+
+  it('o login que conferiu a senha antiga não abre sessão depois que a senha foi trocada', async () => {
+    const maria = await database.addUser('Maria');
+    const sessions = new PrismaSessionRepository(database.client);
+    await users.replaceUserPassword(maria, NEW_PASSWORD_HASH, null);
+
+    const session = await sessions.createSessionIfCredentialsUnchanged({
+      userId: maria,
+      verifiedPasswordHash: ORIGINAL_PASSWORD_HASH,
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+
+    expect(session).toBeNull();
+    expect(await database.countOpenSessionsOf(maria)).toBe(0);
+  });
+
+  it('o login de quem foi desativado no meio do caminho não abre sessão', async () => {
+    const ana = await database.addUser('Ana', { role: 'ADMIN' });
+    const maria = await database.addUser('Maria');
+    await users.deleteUserKeepingAnActiveAdmin(maria, ana, new Date());
+
+    const session = await new PrismaSessionRepository(database.client).createSessionIfCredentialsUnchanged({
+      userId: maria,
+      verifiedPasswordHash: ORIGINAL_PASSWORD_HASH,
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+
+    expect(session).toBeNull();
+  });
+});
+
+describe('Restaurar um usuário excluído', () => {
+  it('volta a mesma pessoa, com o histórico, a senha nova e um funil próprio', async () => {
+    const ana = await database.addUser('Ana', { role: 'ADMIN' });
+    const joao = await database.addUser('João');
+    const emailOfJoao = (await database.findUser(joao)).email;
+    const funnelOfAna = await database.addPipeline(ana, ['Novo lead']);
+    const lead = await database.addLead({ name: 'Cliente', phone: '+5511900000001' });
+    const cardAddedByJoao = await database.addCard(funnelOfAna.pipelineId, funnelOfAna.stageIdByName['Novo lead']!, lead, 1024, joao);
+    await users.deleteUserKeepingAnActiveAdmin(joao, ana, new Date());
+
+    expect(await users.findDeletedUserIdByEmail(emailOfJoao)).toBe(joao);
+    expect(await users.restoreDeletedUser(joao, NEW_PASSWORD_HASH)).toBe(true);
+
+    expect(await database.findUser(joao)).toMatchObject({ active: true, deletedAt: null, passwordHash: NEW_PASSWORD_HASH });
+    expect(await database.findCard(cardAddedByJoao)).toMatchObject({ addedById: joao });
+    expect((await database.findPipelinesOwnedBy(joao)).map((pipeline) => pipeline.name)).toEqual(['Funil de João']);
+    expect(await users.findDeletedUserIdByEmail(emailOfJoao)).toBeNull();
+  });
+
+  it('não restaura quem não está excluído', async () => {
+    const joao = await database.addUser('João');
+
+    expect(await users.restoreDeletedUser(joao, NEW_PASSWORD_HASH)).toBe(false);
+    expect(await database.findUser(joao)).toMatchObject({ passwordHash: ORIGINAL_PASSWORD_HASH });
   });
 });
 

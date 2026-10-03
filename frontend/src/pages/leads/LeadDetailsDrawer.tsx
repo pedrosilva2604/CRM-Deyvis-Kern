@@ -10,7 +10,6 @@ import { formatCalendarDate, formatCurrencyInReais, formatDateTime, formatTimeAg
 import { describeCountry, formatPhoneForDisplay } from '@crm/shared';
 import type { LeadContactStatus } from '@/types/lead';
 import { CONTACT_STATUS_LABELS } from '@/types/lead';
-import { LeadStageLabel } from './LeadStageLabel';
 
 const COPY_CONFIRMATION_MS = 2000;
 
@@ -64,7 +63,7 @@ export function LeadDetailsDrawer({ leadId, onClose }: LeadDetailsDrawerProps) {
   return (
     <Drawer
       title={lead?.name ?? 'Detalhes do lead'}
-      description={lead ? `${lead.pipeline.name} · entrou ${formatTimeAgo(lead.createdAt)}` : undefined}
+      description={lead ? `Entrou ${formatTimeAgo(lead.createdAt)}` : undefined}
       onClose={onClose}
       footer={openConversationButton}
     >
@@ -96,9 +95,6 @@ export function LeadDetailsDrawer({ leadId, onClose }: LeadDetailsDrawerProps) {
           </DetailsSection>
 
           <DetailsSection title="Negócio">
-            <DetailsRow label="Etapa">
-              <LeadStageLabel stage={lead.stage} />
-            </DetailsRow>
             <DetailsRow label="Valor">
               {lead.value ? formatCurrencyInReais(lead.value) : <span className="text-slate-400">Não informado</span>}
             </DetailsRow>

@@ -7,7 +7,6 @@ import type {
   LeadImportProgress,
   LeadListItem,
   LeadListPage,
-  LeadPipeline,
   NewLeadsIndicator,
   TotalLeadsIndicator,
   UnassignedLeadsIndicator,
@@ -28,25 +27,12 @@ const OLDEST_LEAD_AGE_DAYS = 120;
 
 export interface LeadListQuery {
   search: string;
-  stageId: string;
   source: string;
   assignment: string;
   contactStatus: string;
   page: number;
   pageSize: number;
 }
-
-const salesPipeline: LeadPipeline = {
-  id: 'f3b1c2d4-0000-4000-8000-000000000001',
-  name: 'Funil de Vendas',
-  stages: [
-    { id: 'a0000000-0000-4000-8000-000000000001', name: 'Novo lead', color: '#3b82f6', isWon: false, isLost: false },
-    { id: 'a0000000-0000-4000-8000-000000000002', name: 'Em atendimento', color: '#f59e0b', isWon: false, isLost: false },
-    { id: 'a0000000-0000-4000-8000-000000000003', name: 'Proposta', color: '#8b5cf6', isWon: false, isLost: false },
-    { id: 'a0000000-0000-4000-8000-000000000004', name: 'Ganho', color: '#22c55e', isWon: true, isLost: false },
-    { id: 'a0000000-0000-4000-8000-000000000005', name: 'Perdido', color: '#ef4444', isWon: false, isLost: true },
-  ],
-};
 
 const salesTeam: LeadAssignee[] = [
   { id: 'b0000000-0000-4000-8000-000000000001', name: 'Ana Ribeiro' },
@@ -130,7 +116,6 @@ function randomPastDate(now: number, maximumAgeDays: number) {
 function createFakeLead(leadNumber: number, now: number): LeadListItem {
   const fullName = `${pickOne(firstNames)} ${pickOne(lastNames)}`;
   const phone = randomPhone();
-  const stage = pickOne(salesPipeline.stages);
   const isRecentLead = leadNumber % 15 === 0;
   const createdAt = randomPastDate(now, isRecentLead ? NEW_LEAD_WINDOW_DAYS - 1 : OLDEST_LEAD_AGE_DAYS);
   const hasConversation = happensWithChance(0.7);
@@ -148,8 +133,6 @@ function createFakeLead(leadNumber: number, now: number): LeadListItem {
     tags: happensWithChance(0.5) ? [pickOne(leadTags)] : [],
     value: happensWithChance(0.45) ? (Math.round(random() * 90 + 5) * 100).toFixed(2) : null,
     contactStatus: randomContactStatus(),
-    pipeline: { id: salesPipeline.id, name: salesPipeline.name },
-    stage,
     assignedTo: happensWithChance(0.74) ? pickOne(salesTeam) : null,
     unreadCount: hasConversation && happensWithChance(0.25) ? Math.ceil(random() * 6) : 0,
     lastMessageAt,
@@ -202,7 +185,6 @@ function isNewestFirst(firstLead: LeadListItem, secondLead: LeadListItem) {
 export function listLeads(leadListQuery: LeadListQuery): LeadListPage {
   const matchingLeads = storedLeads
     .filter((lead) => matchesSearchTerm(lead, leadListQuery.search.trim()))
-    .filter((lead) => !leadListQuery.stageId || lead.stage.id === leadListQuery.stageId)
     .filter((lead) => !leadListQuery.source || lead.source === leadListQuery.source)
     .filter((lead) => matchesAssignment(lead, leadListQuery.assignment))
     .filter((lead) => !leadListQuery.contactStatus || lead.contactStatus === leadListQuery.contactStatus)
@@ -258,7 +240,6 @@ export function countCompleteProfiles(): CompleteProfilesIndicator {
 export function listFilterOptions(): LeadFilterOptions {
   const sourcesInUse = new Set(storedLeads.map((lead) => lead.source).filter((source): source is string => source !== null));
   return {
-    pipelines: [salesPipeline],
     sources: [...sourcesInUse].sort((first, second) => first.localeCompare(second, 'pt-BR')),
     assignees: salesTeam,
   };
@@ -273,7 +254,6 @@ function isAlreadyStored(rowToImport: LeadSpreadsheetRowToImport) {
 }
 
 function toFakeLead(rowToImport: LeadSpreadsheetRowToImport, fakeLeadId: string, now: string): LeadListItem {
-  const firstStage = salesPipeline.stages[0] as LeadPipeline['stages'][number];
   return {
     id: fakeLeadId,
     name: rowToImport.name,
@@ -284,8 +264,6 @@ function toFakeLead(rowToImport: LeadSpreadsheetRowToImport, fakeLeadId: string,
     tags: [],
     value: null,
     contactStatus: 'VALID',
-    pipeline: { id: salesPipeline.id, name: salesPipeline.name },
-    stage: firstStage,
     assignedTo: null,
     unreadCount: 0,
     lastMessageAt: null,
@@ -318,8 +296,9 @@ export function importLeadSpreadsheet(csvText: string, maximumRows: number): Lea
     processedRows: content.rowsToImport.length,
     importedLeads: newLeads.length,
     skippedExistingLeads: content.rowsToImport.length - newLeads.length,
-    restoredLeads: 0,
-    skippedDeletedLeads: 0,
+    addedToPipelineLeads: 0,
+    alreadyInPipelineLeads: 0,
+    importsIntoPipeline: false,
     createdAt: now,
     finishedAt: now,
   });

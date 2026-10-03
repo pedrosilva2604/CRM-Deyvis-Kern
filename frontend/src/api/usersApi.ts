@@ -27,6 +27,10 @@ export const usersApi = {
     await api.patch(`/users/${userId}/password`, { password: newPassword });
   },
 
+  async restoreUser(userId: string, newPassword: string): Promise<void> {
+    await api.post(`/users/${userId}/restore`, { password: newPassword });
+  },
+
   async deleteUser(userId: string): Promise<void> {
     await api.delete(`/users/${userId}`);
   },

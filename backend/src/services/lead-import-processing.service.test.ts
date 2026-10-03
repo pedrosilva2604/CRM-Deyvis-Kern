@@ -3,6 +3,7 @@ import type { LeadImportCounters, LeadImportRowToProcess } from '@/models/lead-i
 import { FixedClock } from '@/testing/fixed-clock';
 import { InMemoryLeadImportRepository } from '@/testing/in-memory-lead-import.repository';
 import { RecordingLeadImportNotifications } from '@/testing/recording-lead-import-notifications';
+import { RecordingPipelineChangeAnnouncer } from '@/testing/recording-pipeline-change-announcer';
 import { RecordingRealtimePublisher } from '@/testing/recording-realtime-publisher';
 import { LeadImportProcessingService } from './lead-import-processing.service';
 
@@ -17,14 +18,15 @@ function createProcessingScenario() {
   const leadImports = new InMemoryLeadImportRepository();
   const notifications = new RecordingLeadImportNotifications();
   const realtimePublisher = new RecordingRealtimePublisher();
-  const processing = new LeadImportProcessingService(leadImports, notifications, realtimePublisher, clock, {
+  const pipelineChanges = new RecordingPipelineChangeAnnouncer();
+  const processing = new LeadImportProcessingService(leadImports, notifications, realtimePublisher, pipelineChanges, clock, {
     chunkSize: CHUNK_SIZE,
   });
   const reportedProgress: LeadImportCounters[] = [];
   const reportProgress = async (counters: LeadImportCounters) => {
     reportedProgress.push(counters);
   };
-  return { processing, leadImports, notifications, realtimePublisher, reportedProgress, reportProgress };
+  return { processing, leadImports, notifications, realtimePublisher, pipelineChanges, reportedProgress, reportProgress };
 }
 
 describe('Processamento da importação', () => {
@@ -41,8 +43,8 @@ describe('Processamento da importação', () => {
         processedRows: 3,
         importedLeads: 3,
         skippedExistingLeads: 0,
-        restoredLeads: 0,
-        skippedDeletedLeads: 0,
+        addedToPipelineLeads: 0,
+        alreadyInPipelineLeads: 0,
       },
     });
     expect(leadImports.find('importacao')).toMatchObject({ status: 'COMPLETED', rows: [] });
@@ -72,36 +74,6 @@ describe('Processamento da importação', () => {
     await processing.processLeadImport('importacao', reportProgress);
 
     expect(leadImports.find('importacao')).toMatchObject({ importedLeads: 1, skippedExistingLeads: 1 });
-  });
-
-  it('quando um ADMIN importa, restaura o lead excluído daquele telefone', async () => {
-    const { processing, leadImports, reportProgress } = createProcessingScenario();
-    leadImports.phonesOfDeletedLeads.add('+5511900000002');
-    leadImports.add({
-      importId: 'importacao',
-      requesterIsAdmin: true,
-      rows: ['+5511900000001', '+5511900000002'].map(rowWithPhone),
-    });
-
-    await processing.processLeadImport('importacao', reportProgress);
-
-    expect(leadImports.find('importacao')).toMatchObject({ importedLeads: 1, restoredLeads: 1, skippedDeletedLeads: 0 });
-    expect(leadImports.phonesOfDeletedLeads.has('+5511900000002')).toBe(false);
-  });
-
-  it('quando um vendedor importa, não restaura e conta o lead excluído à parte', async () => {
-    const { processing, leadImports, reportProgress } = createProcessingScenario();
-    leadImports.phonesOfDeletedLeads.add('+5511900000002');
-    leadImports.add({
-      importId: 'importacao',
-      requesterIsAdmin: false,
-      rows: ['+5511900000001', '+5511900000002'].map(rowWithPhone),
-    });
-
-    await processing.processLeadImport('importacao', reportProgress);
-
-    expect(leadImports.find('importacao')).toMatchObject({ importedLeads: 1, restoredLeads: 0, skippedDeletedLeads: 1 });
-    expect(leadImports.phonesOfDeletedLeads.has('+5511900000002')).toBe(true);
   });
 
   it('informa o progresso a cada pedaço, para a tela e em tempo real para quem enviou', async () => {

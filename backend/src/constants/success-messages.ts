@@ -2,12 +2,26 @@ export const LEAD_SUCCESS_MESSAGES = {
   CREATED: 'Lead criado',
   UPDATED: 'Lead atualizado',
   DELETED: 'Lead excluído',
-  RESTORED: 'Lead restaurado',
 } as const;
 
 export const LEAD_IMPORT_SUCCESS_MESSAGES = {
   REQUESTED: 'Importação recebida',
   RETRY_REQUESTED: 'Importação retomada',
+} as const;
+
+export const PIPELINE_SUCCESS_MESSAGES = {
+  CREATED: 'Funil criado',
+  RENAMED: 'Funil renomeado',
+  DELETED: 'Funil excluído',
+  MEMBER_ADDED: 'Participante adicionado',
+  MEMBER_REMOVED: 'Participante removido',
+  STAGE_CREATED: 'Etapa criada',
+  STAGE_UPDATED: 'Etapa atualizada',
+  STAGES_REORDERED: 'Etapas reordenadas',
+  STAGE_DELETED: 'Etapa excluída',
+  CARD_ADDED: 'Lead adicionado ao funil',
+  CARD_MOVED: 'Cartão movido',
+  CARD_REMOVED: 'Lead retirado do funil',
 } as const;
 
 export const NOTIFICATION_SUCCESS_MESSAGES = {
@@ -22,6 +36,7 @@ export const USER_SUCCESS_MESSAGES = {
   DEACTIVATED: 'Usuário desativado',
   PASSWORD_CHANGED: 'Senha do usuário alterada',
   DELETED: 'Usuário excluído',
+  RESTORED: 'Usuário restaurado',
 } as const;
 
 export const AUTH_SUCCESS_MESSAGES = {

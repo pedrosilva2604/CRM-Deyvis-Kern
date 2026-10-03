@@ -55,6 +55,13 @@ export class UserController {
     sendSuccessMessage(res, HttpStatus.OK, USER_SUCCESS_MESSAGES.PASSWORD_CHANGED);
   };
 
+  restoreUser = async (req: Request<UserIdParams>, res: Response) => {
+    const newPasswordRequest: UpdateUserPasswordInput = req.body;
+    const loggedUserContext = this.requestContextExtractor.extractLoggedUserContext(req);
+    await this.userService.restoreUser({ targetUserId: req.params.id, data: newPasswordRequest }, loggedUserContext);
+    sendSuccessMessage(res, HttpStatus.OK, USER_SUCCESS_MESSAGES.RESTORED);
+  };
+
   deleteUser = async (req: Request<UserIdParams>, res: Response) => {
     const loggedUserContext = this.requestContextExtractor.extractLoggedUserContext(req);
     await this.userService.deleteUser({ targetUserId: req.params.id }, loggedUserContext);

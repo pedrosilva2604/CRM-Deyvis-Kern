@@ -85,11 +85,5 @@ export class LeadRoutes {
       this.validate.validateParams(leadIdParamsSchema),
       this.leads.deleteLead,
     );
-    this.router.patch(
-      '/:leadId/restore',
-      this.authMiddleware.requireRole('ADMIN'),
-      this.validate.validateParams(leadIdParamsSchema),
-      this.leads.restoreLead,
-    );
   }
 }

@@ -58,14 +58,13 @@ const leadTagsSchema = z
   .max(MAXIMUM_TAGS_PER_LEAD)
   .transform((tags) => [...new Set(tags)]);
 
-const leadValueSchema = z
+export const moneyValueSchema = z
   .union([z.number(), z.string().trim().regex(/^\d+(\.\d{1,2})?$/, 'Valor no formato 1500.00')])
   .transform(Number)
   .refine((amount) => amount >= 0 && amount <= MAXIMUM_LEAD_VALUE, 'Valor fora do permitido')
   .transform((amount) => amount.toFixed(2))
   .nullable();
 
-const stageIdSchema = z.string().uuid('Etapa inválida');
 const assigneeIdSchema = z.string().uuid('Responsável inválido').nullable();
 
 export const createLeadSchema: ZodType<CreateLeadInput, ZodTypeDef, unknown> = z
@@ -74,10 +73,9 @@ export const createLeadSchema: ZodType<CreateLeadInput, ZodTypeDef, unknown> = z
     phone: leadPhoneSchema,
     email: leadEmailSchema.default(null),
     enteredOn: enteredOnSchema.nullable().default(null),
-    stageId: stageIdSchema,
     source: leadSourceSchema.default(null),
     tags: leadTagsSchema.default([]),
-    value: leadValueSchema.default(null),
+    value: moneyValueSchema.default(null),
     assignedToId: assigneeIdSchema.default(null),
   })
   .strict('Campo não permitido');
@@ -88,10 +86,9 @@ export const updateLeadSchema: ZodType<UpdateLeadInput, ZodTypeDef, unknown> = z
     phone: leadPhoneSchema.optional(),
     email: leadEmailSchema.optional(),
     enteredOn: enteredOnSchema.optional(),
-    stageId: stageIdSchema.optional(),
     source: leadSourceSchema.optional(),
     tags: leadTagsSchema.optional(),
-    value: leadValueSchema.optional(),
+    value: moneyValueSchema.optional(),
     assignedToId: assigneeIdSchema.optional(),
     contactStatus: z.nativeEnum(LeadContactStatus).optional(),
   })
@@ -112,7 +109,6 @@ export const leadListFiltersSchema: ZodType<LeadListFilters, ZodTypeDef, unknown
       .max(MAXIMUM_SEARCH_LENGTH)
       .optional()
       .transform((search) => search || undefined),
-    stageId: z.string().uuid('Etapa inválida').optional(),
     source: z.string().trim().max(MAXIMUM_SOURCE_LENGTH).optional(),
     assignment: z.union([z.literal(UNASSIGNED_LEADS_FILTER), z.string().uuid('Responsável inválido')]).optional(),
     contactStatus: z.nativeEnum(LeadContactStatus).optional(),

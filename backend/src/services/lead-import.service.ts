@@ -1,10 +1,12 @@
 import { LeadImportStatus, Role } from '@prisma/client';
 import { readLeadSpreadsheet, type LeadSpreadsheetContent, type LeadSpreadsheetRowToImport } from '@crm/shared';
 import { BadRequestError, ConflictError, NotFoundError } from '@/errors/app-errors';
-import { LEAD_IMPORT_ERRORS } from '@/errors/errors.constants';
+import { LEAD_IMPORT_ERRORS, PIPELINE_ERRORS } from '@/errors/errors.constants';
 import type { BusinessCalendar } from '@/infra/business-calendar';
 import type { LoggedUserContext } from '@/models/common.model';
 import type {
+  LeadImportDestination,
+  LeadImportIntoPipelineRequest,
   LeadImportProgress,
   LeadImportProgressRequest,
   LeadImportReceipt,
@@ -13,7 +15,7 @@ import type {
 } from '@/models/lead-import.model';
 import type { ILeadImportQueue } from '@/queues/lead-import.queue';
 import type { ILeadImportRepository } from '@/repositories/lead-import.repository';
-import type { IPipelineRepository, StageLocation } from '@/repositories/pipeline.repository';
+import type { IPipelineRepository } from '@/repositories/pipeline.repository';
 import type { IAuditService } from './audit.service';
 
 export interface LeadImportLimits {
@@ -22,6 +24,7 @@ export interface LeadImportLimits {
 
 export interface ILeadImportService {
   requestLeadImport(csvText: string, loggedUserContext: LoggedUserContext): Promise<LeadImportReceipt>;
+  requestLeadImportIntoPipeline(request: LeadImportIntoPipelineRequest, loggedUserContext: LoggedUserContext): Promise<LeadImportReceipt>;
   getLeadImportProgress(request: LeadImportProgressRequest, loggedUserContext: LoggedUserContext): Promise<LeadImportProgress>;
   retryLeadImport(request: LeadImportRetryRequest, loggedUserContext: LoggedUserContext): Promise<void>;
 }
@@ -29,7 +32,7 @@ export interface ILeadImportService {
 export class LeadImportService implements ILeadImportService {
   constructor(
     private readonly leadImportRepository: ILeadImportRepository,
-    private readonly pipelineRepository: IPipelineRepository,
+    private readonly pipelineRepository: Pick<IPipelineRepository, 'findPipelineAccess' | 'findStage'>,
     private readonly leadImportQueue: ILeadImportQueue,
     private readonly audit: IAuditService,
     private readonly businessCalendar: BusinessCalendar,
@@ -37,21 +40,48 @@ export class LeadImportService implements ILeadImportService {
   ) {}
 
   async requestLeadImport(csvText: string, loggedUserContext: LoggedUserContext): Promise<LeadImportReceipt> {
+    return await this.registerLeadImport(csvText, null, loggedUserContext);
+  }
+
+  async requestLeadImportIntoPipeline(
+    { targetPipelineId, targetStageId, csvText }: LeadImportIntoPipelineRequest,
+    loggedUserContext: LoggedUserContext,
+  ): Promise<LeadImportReceipt> {
+    await this.assertCanWorkInPipelineStage(targetPipelineId, targetStageId, loggedUserContext);
+    return await this.registerLeadImport(csvText, { pipelineId: targetPipelineId, stageId: targetStageId }, loggedUserContext);
+  }
+
+  private async registerLeadImport(
+    csvText: string,
+    destination: LeadImportDestination | null,
+    loggedUserContext: LoggedUserContext,
+  ): Promise<LeadImportReceipt> {
     await this.assertNoRunningImport(loggedUserContext.loggedUser.id);
     const spreadsheetContent = this.readSpreadsheetOrFail(csvText);
-    const receivingStage = await this.findStageToReceiveLeadsOrFail();
     const importId = await this.leadImportRepository.createLeadImport({
       totalRows: spreadsheetContent.totalRows,
       invalidRows: spreadsheetContent.invalidRows.length,
       duplicateRowsInFile: spreadsheetContent.duplicateRows.length,
-      pipelineId: receivingStage.pipelineId,
-      stageId: receivingStage.stageId,
+      pipelineId: destination?.pipelineId ?? null,
+      stageId: destination?.stageId ?? null,
       requestedById: loggedUserContext.loggedUser.id,
       rows: spreadsheetContent.rowsToImport.map((row) => this.toLeadImportRowData(row)),
     });
-    await this.recordImportRequested(loggedUserContext, importId, spreadsheetContent);
+    if (importId === null) throw new NotFoundError(PIPELINE_ERRORS.STAGE_NOT_FOUND);
+    await this.recordImportRequested(loggedUserContext, importId, spreadsheetContent, destination);
     await this.enqueueOrLeaveForReconciler(importId);
     return { importId };
+  }
+
+  private async assertCanWorkInPipelineStage(pipelineId: string, stageId: string, { loggedUser }: LoggedUserContext): Promise<void> {
+    const access = await this.pipelineRepository.findPipelineAccess(pipelineId, {
+      userId: loggedUser.id,
+      isAdmin: loggedUser.role === Role.ADMIN,
+    });
+    if (!access) throw new NotFoundError(PIPELINE_ERRORS.NOT_FOUND);
+    const stage = await this.pipelineRepository.findStage(stageId);
+    if (!stage || stage.pipelineId !== pipelineId) throw new NotFoundError(PIPELINE_ERRORS.STAGE_NOT_FOUND);
+    if (stage.isWon || stage.isLost) throw new BadRequestError(PIPELINE_ERRORS.IMPORT_ONLY_INTO_OPEN_STAGE);
   }
 
   async getLeadImportProgress(
@@ -120,12 +150,6 @@ export class LeadImportService implements ILeadImportService {
     return spreadsheetReading.content;
   }
 
-  private async findStageToReceiveLeadsOrFail(): Promise<StageLocation> {
-    const receivingStage = await this.pipelineRepository.findFirstStageOfFirstPipeline();
-    if (!receivingStage) throw new BadRequestError(LEAD_IMPORT_ERRORS.NO_PIPELINE_TO_RECEIVE_LEADS);
-    return receivingStage;
-  }
-
   private toLeadImportRowData(row: LeadSpreadsheetRowToImport): LeadImportRowData {
     const enteredOn = row.enteredOn ?? this.businessCalendar.todayAsIsoDate();
     return {
@@ -142,6 +166,7 @@ export class LeadImportService implements ILeadImportService {
     loggedUserContext: LoggedUserContext,
     importId: string,
     spreadsheetContent: LeadSpreadsheetContent,
+    destination: LeadImportDestination | null,
   ): Promise<void> {
     await this.audit.recordAuditLog(loggedUserContext, {
       action: 'lead.import_requested',
@@ -152,6 +177,8 @@ export class LeadImportService implements ILeadImportService {
         rowsToImport: spreadsheetContent.rowsToImport.length,
         invalidRows: spreadsheetContent.invalidRows.length,
         duplicateRowsInFile: spreadsheetContent.duplicateRows.length,
+        pipelineId: destination?.pipelineId ?? null,
+        stageId: destination?.stageId ?? null,
       },
     });
   }

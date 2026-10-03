@@ -6,13 +6,13 @@ import { createDatabaseClient, type DatabaseClient } from '@/repositories/databa
 export interface TestFunnel {
   pipelineId: string;
   stageId: string;
+  ownerId: string;
 }
 
 export interface LeadToAdd {
   name: string;
   phone: string;
   email?: string;
-  deleted?: boolean;
 }
 
 export interface LeadImportToAdd {
@@ -20,6 +20,17 @@ export interface LeadImportToAdd {
   status: LeadImportStatus;
   phonesToImport?: string[];
   processedRows?: number;
+  intoTestFunnel?: boolean;
+}
+
+export interface TestPipeline {
+  pipelineId: string;
+  stageIdByName: Record<string, string>;
+}
+
+export interface StageMarks {
+  wonStage?: string;
+  lostStage?: string;
 }
 
 export interface UserToAdd {
@@ -46,17 +57,20 @@ export class TestDatabase {
 
   async prepareEmptyDatabase(): Promise<void> {
     await this.client.$transaction([
+      this.client.message.deleteMany(),
+      this.client.sale.deleteMany(),
       this.client.lead.deleteMany(),
       this.client.leadImport.deleteMany(),
       this.client.notification.deleteMany(),
       this.client.pipeline.deleteMany(),
       this.client.user.deleteMany(),
     ]);
+    const owner = await this.addUser('Dono do funil de teste');
     const pipeline = await this.client.pipeline.create({
-      data: { name: 'Funil de teste', stages: { create: { name: 'Novo' } } },
+      data: { name: 'Funil de teste', ownerId: owner, stages: { create: { name: 'Novo' } } },
       include: { stages: true },
     });
-    this.currentFunnel = { pipelineId: pipeline.id, stageId: pipeline.stages[0]!.id };
+    this.currentFunnel = { pipelineId: pipeline.id, stageId: pipeline.stages[0]!.id, ownerId: owner };
   }
 
   async addUser(name: string, { role = 'AGENT', active = true }: UserToAdd = {}): Promise<string> {
@@ -96,22 +110,33 @@ export class TestDatabase {
     return await this.client.user.count({ where: { role: 'ADMIN', active: true } });
   }
 
-  async addLead({ name, phone, email, deleted = false }: LeadToAdd): Promise<string> {
+  async addLead({ name, phone, email }: LeadToAdd): Promise<string> {
     const lead = await this.client.lead.create({
-      data: {
-        name,
-        phone,
-        email: email ?? null,
-        enteredOn: ENTERED_ON,
-        deletedAt: deleted ? new Date() : null,
-        ...this.funnel,
-      },
+      data: { name, phone, email: email ?? null, enteredOn: ENTERED_ON },
       select: { id: true },
     });
     return lead.id;
   }
 
-  async addLeadImport({ requestedById, status, phonesToImport = [], processedRows = 0 }: LeadImportToAdd): Promise<string> {
+  async addMessage(leadId: string, content: string): Promise<string> {
+    const { phone, name } = await this.client.lead.findUniqueOrThrow({ where: { id: leadId }, select: { phone: true, name: true } });
+    const message = await this.client.message.create({
+      data: { leadId, contactPhone: phone!, contactName: name, direction: 'INBOUND', content },
+      select: { id: true },
+    });
+    return message.id;
+  }
+
+  async addSale(leadId: string, amount: string): Promise<string> {
+    const sale = await this.client.sale.create({ data: { leadId, amount }, select: { id: true } });
+    return sale.id;
+  }
+
+  async findLead(leadId: string) {
+    return await this.client.lead.findUniqueOrThrow({ where: { id: leadId } });
+  }
+
+  async addLeadImport({ requestedById, status, phonesToImport = [], processedRows = 0, intoTestFunnel = false }: LeadImportToAdd): Promise<string> {
     const leadImport = await this.client.leadImport.create({
       data: {
         status,
@@ -121,7 +146,7 @@ export class TestDatabase {
         duplicateRowsInFile: 0,
         rowsToImport: phonesToImport.length,
         processedRows,
-        ...this.funnel,
+        ...(intoTestFunnel && { pipelineId: this.funnel.pipelineId, stageId: this.funnel.stageId }),
         rows: {
           createMany: {
             data: phonesToImport.map((phone, rowIndex) => ({
@@ -138,6 +163,63 @@ export class TestDatabase {
     return leadImport.id;
   }
 
+  async addPipeline(ownerId: string, stageNames: string[], { wonStage, lostStage }: StageMarks = {}): Promise<TestPipeline> {
+    const pipeline = await this.client.pipeline.create({
+      data: {
+        name: `Funil ${randomUUID().slice(0, 8)}`,
+        ownerId,
+        stages: {
+          create: stageNames.map((name, position) => ({ name, position, isWon: name === wonStage, isLost: name === lostStage })),
+        },
+      },
+      include: { stages: { orderBy: { position: 'asc' } } },
+    });
+    return {
+      pipelineId: pipeline.id,
+      stageIdByName: Object.fromEntries(pipeline.stages.map((stage) => [stage.name, stage.id])),
+    };
+  }
+
+  async addMember(pipelineId: string, userId: string): Promise<void> {
+    const addedById = await this.findOwnerOf(pipelineId);
+    await this.client.pipelineMember.create({ data: { pipelineId, userId, addedById } });
+  }
+
+  async addCard(pipelineId: string, stageId: string, leadId: string, position: number, addedById?: string): Promise<string> {
+    const card = await this.client.pipelineCard.create({
+      data: { pipelineId, stageId, leadId, position, addedById: addedById ?? (await this.findOwnerOf(pipelineId)) },
+      select: { id: true },
+    });
+    return card.id;
+  }
+
+  private async findOwnerOf(pipelineId: string): Promise<string> {
+    const pipeline = await this.client.pipeline.findUniqueOrThrow({ where: { id: pipelineId }, select: { ownerId: true } });
+    return pipeline.ownerId;
+  }
+
+  async findLeadNamesInStageOrder(stageId: string): Promise<string[]> {
+    const cards = await this.client.pipelineCard.findMany({
+      where: { stageId },
+      orderBy: [{ position: 'asc' }, { id: 'asc' }],
+      select: { lead: { select: { name: true } } },
+    });
+    return cards.map(({ lead }) => lead.name);
+  }
+
+  async findCardPositionsOfStage(stageId: string): Promise<number[]> {
+    const cards = await this.client.pipelineCard.findMany({ where: { stageId }, select: { position: true } });
+    return cards.map(({ position }) => position);
+  }
+
+  async findCard(cardId: string) {
+    return await this.client.pipelineCard.findUniqueOrThrow({ where: { id: cardId } });
+  }
+
+  async findPipelinesOwnedBy(ownerId: string) {
+    return await this.client.pipeline.findMany({ where: { ownerId }, include: { stages: { orderBy: { position: 'asc' } } } });
+  }
+
   async findLeadImport(importId: string) {
     return await this.client.leadImport.findUniqueOrThrow({ where: { id: importId } });
   }
@@ -151,8 +233,8 @@ export class TestDatabase {
   }
 
   async findPhonesOfAllLeads(): Promise<string[]> {
-    const leads = await this.client.lead.findMany({ select: { phone: true }, orderBy: { phone: 'asc' } });
-    return leads.map(({ phone }) => phone);
+    const leads = await this.client.lead.findMany({ where: { phone: { not: null } }, select: { phone: true }, orderBy: { phone: 'asc' } });
+    return leads.flatMap(({ phone }) => (phone === null ? [] : [phone]));
   }
 
   async disconnect(): Promise<void> {
@@ -160,13 +242,12 @@ export class TestDatabase {
   }
 }
 
-export function leadsToCreateFrom(phones: string[], funnel: TestFunnel) {
+export function leadsToCreateFrom(phones: string[]) {
   return phones.map((phone) => ({
     name: `Lead ${phone}`,
     phone,
     phoneCountry: 'BR',
     email: null,
     enteredOn: ENTERED_ON,
-    ...funnel,
   }));
 }
